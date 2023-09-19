@@ -28,14 +28,17 @@ class TileDataset(Dataset):
         # we need open all files once to get the size of the dataset
         logger.info("Loading all files to get the size of the dataset")
         self.size_list = []
+        self.cache = cache
+        self.data_dict = {}
         for f in tqdm(self.file_list):
             with np.load(f) as data:
                 self.size_list.append(len(data["config_runtime"]))
+                # read out all the data if we want to cache
+                if self.cache:
+                    self.data_dict[f] = {k: v for k, v in data.items()}
 
         self.length = sum(self.size_list)
         self.offsets = np.cumsum(self.size_list)
-        self.cache = cache
-        self.cache_dict = {}
         logger.info(f"The dataset has a total size of {self.length}")
 
     def __getitem__(self, idx):
@@ -44,9 +47,6 @@ class TileDataset(Dataset):
         :param idx: The index of the sample to return
         :return: The sample
         """
-
-        if idx in self.cache_dict:
-            return self.cache_dict[idx]
 
         # get the file
         file_idx = np.searchsorted(self.offsets, idx, side="right")
@@ -58,33 +58,34 @@ class TileDataset(Dataset):
             offset = idx - self.offsets[file_idx - 1]
 
         # load the file
-        with np.load(self.file_list[file_idx]) as data:
-            # read out the data for this graph
-            node_feat = data["node_feat"]
-            node_opcode = data["node_opcode"]
-            edge_index = data["edge_index"]
+        if self.cache:
+            data = self.data_dict[self.file_list[file_idx]]
+        else:
+            with np.load(self.file_list[file_idx]) as data:
+                data = {k: v for k, v in data.items()}
 
-            # we add an imaginary node that connects all the output nodes
-            outputs = np.where(node_feat[:, 0] == 1)[0]
-            new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
-            new_edges[:, 1] = outputs
-            new_edges[:, 0] = len(node_feat)
-            edge_index = np.concatenate([edge_index, new_edges], axis=0)
+        # read out the data for this graph
+        node_feat = data["node_feat"]
+        node_opcode = data["node_opcode"]
+        edge_index = data["edge_index"]
 
-            # read out the specific config
-            config_feat = data["config_feat"][offset]
+        # we add an imaginary node that connects all the output nodes
+        outputs = np.where(node_feat[:, 0] == 1)[0]
+        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
+        new_edges[:, 1] = outputs
+        new_edges[:, 0] = len(node_feat)
+        edge_index = np.concatenate([edge_index, new_edges], axis=0)
 
-            # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
-            config_runtime = data["config_runtime"][offset] / data["config_runtime_normalizers"][offset]
-            config_runtime *= data["config_runtime"][0]
+        # read out the specific config
+        config_feat = data["config_feat"][offset]
+
+        # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
+        config_runtime = data["config_runtime"][offset] / data["config_runtime_normalizers"][offset]
+        config_runtime *= data["config_runtime"][0]
 
         # tile config_features such that axis 0 matches with the number of nodes
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
         features = np.concatenate([node_feat, node_opcode[:, None], config_feat], axis=1)
-
-        # cache the result
-        if self.cache:
-            self.cache_dict[idx] = features, config_runtime, edge_index
 
         return features, config_runtime, edge_index
 
