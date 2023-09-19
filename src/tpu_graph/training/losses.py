@@ -17,4 +17,4 @@ def square_loss(pred, label, log=False):
         else:
             loss += torch.mean((p - l) ** 2)
 
-    return loss
+    return loss / len(pred)
