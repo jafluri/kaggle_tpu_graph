@@ -123,7 +123,7 @@ class TileDataset(Dataset):
 
         return features, times, edge_indices
 
-    def get_dataloader(self, batch_size: int, shuffle: bool = True, num_workers: int = 8, pin_memory: bool = False):
+    def get_dataloader(self, batch_size: int, shuffle: bool = True, num_workers: int = 0, pin_memory: bool = False):
         """
         Returns a dataloader for the dataset
         :param batch_size: The batch size to use
