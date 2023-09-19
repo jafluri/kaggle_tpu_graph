@@ -13,10 +13,11 @@ class TileDataset(Dataset):
     This class implements the dataset for the tiles. It loads all the files and provides an interface to them.
     """
 
-    def __init__(self, data_path: str | bytes | os.PathLike):
+    def __init__(self, data_path: str | bytes | os.PathLike, cache=False):
         """
         Inits the dataset with a directory containing the NPZ files
         :param data_path: The directory containing the NPZ files used for the training of the tiles network
+        :param cache: If True, the dataset is cached in memory
         """
 
         # get all the files
@@ -33,6 +34,8 @@ class TileDataset(Dataset):
 
         self.length = sum(self.size_list)
         self.offsets = np.cumsum(self.size_list)
+        self.cache = cache
+        self.cache_dict = {}
         logger.info(f"The dataset has a total size of {self.length}")
 
     def __getitem__(self, idx):
@@ -41,6 +44,9 @@ class TileDataset(Dataset):
         :param idx: The index of the sample to return
         :return: The sample
         """
+
+        if idx in self.cache_dict:
+            return self.cache_dict[idx]
 
         # get the file
         file_idx = np.searchsorted(self.offsets, idx, side="right")
@@ -75,6 +81,11 @@ class TileDataset(Dataset):
         # tile config_features such that axis 0 matches with the number of nodes
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
         features = np.concatenate([node_feat, node_opcode[:, None], config_feat], axis=1)
+
+        # cache the result
+        if self.cache:
+            self.cache_dict[idx] = features, config_runtime, edge_index
+
         return features, config_runtime, edge_index
 
     def __len__(self):
@@ -85,29 +96,48 @@ class TileDataset(Dataset):
 
         return self.length
 
+    @staticmethod
+    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
+        """
+        A custom collate function for the tiles dataset
+        :param tensors: A list of tuples that are returned by the dataset
+        :param dtype: The dtype to use for the tensors
+        :return: The collated output for the dataloader
+        """
 
-def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
-    """
-    A custom collate function for the tiles dataset
-    :param tensors: A list of tuples that are returned by the dataset
-    :param dtype: The dtype to use for the tensors
-    :return: The collated output for the dataloader
-    """
+        # list for the collection
+        features = []
+        times = []
+        edge_indices = []
 
-    # list for the collection
-    features = []
-    times = []
-    edge_indices = []
+        # unpack everything
+        for t in tensors:
+            assert len(t) == 3, "The length of the tensors must be 3"
+            node_feat, config_runtime, edge_index = t
 
-    # unpack everything
-    for t in tensors:
-        assert len(t) == 3, "The length of the tensors must be 3"
-        node_feat, config_runtime, edge_index = t
+            # append the tensors that need to go through the network
+            features.append(torch.tensor(node_feat, dtype=dtype))
+            times.append(torch.tensor(config_runtime, dtype=dtype))
+            # the edge index needs to be int32
+            edge_indices.append(torch.tensor(edge_index, dtype=torch.int32))
 
-        # append the tensors that need to go through the network
-        features.append(torch.tensor(node_feat, dtype=dtype))
-        times.append(torch.tensor(config_runtime, dtype=dtype))
-        # the edge index needs to be int32
-        edge_indices.append(torch.tensor(edge_index, dtype=torch.int32))
+        return features, times, edge_indices
 
-    return features, times, edge_indices
+    def get_dataloader(self, batch_size: int, shuffle: bool = True, num_workers: int = 8, pin_memory: bool = False):
+        """
+        Returns a dataloader for the dataset
+        :param batch_size: The batch size to use
+        :param shuffle: If True, the dataset is shuffled
+        :param num_workers: The number of workers to use for the dataloader
+        :param pin_memory: If True, the memory is pinned
+        :return: The dataloader
+        """
+
+        return torch.utils.data.DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            collate_fn=self.collate_fn_tiles,
+        )
