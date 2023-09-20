@@ -34,11 +34,12 @@ class TileNetwork(nn.Sequential):
             node_runtimes.append(super().forward(f))
         return node_runtimes
 
-    def accumulate_runtime(self, features: list[torch.Tensor], edge_indices: list[torch.Tensor]):
+    def accumulate_runtime(self, features: list[torch.Tensor], edge_indices: list[torch.Tensor], graphs: list[Graph]):
         """
         Calls the network on the features and accumulates the runtime over the graph defined by the edge_indices
         :param features: A list of tensors with shape (n_nodes, n_features)
         :param edge_indices: A list of tensors with shape (n_edges, 2)
+        :param graphs: A list of graphs
         :return: A tensor with length of the input features containing the accumulated runtime
         """
 
@@ -47,13 +48,10 @@ class TileNetwork(nn.Sequential):
 
         # accumulate the runtimes
         accumulated_runtimes = []
-        for runtimes, feat, edges in zip(node_runtimes, features, edge_indices):
+        for runtimes, feat, edges, graph in zip(node_runtimes, features, edge_indices, graphs):
             # we need to flip the edges because of the different definition of the edge index
-            edges = np.fliplr(edges.cpu().numpy())
+            edges = edges.cpu().numpy()
             runtime_numpy = runtimes.cpu().detach().numpy()
-
-            # create the graph
-            graph = Graph(n=len(runtime_numpy) + 1, edges=edges, directed=True)
 
             # get the output node (this is always an imaginary node added by the dataset loader)
             output_node = len(runtime_numpy)

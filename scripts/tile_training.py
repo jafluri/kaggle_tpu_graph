@@ -90,8 +90,8 @@ def train_tile_network(**kwargs):
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
-        for batch_idx, (features, runtimes, edges) in enumerate(pbar):
-            pred_runtimes = network.accumulate_runtime(features, edges)
+        for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
+            pred_runtimes = network.accumulate_runtime(features, edges, graphs)
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=not kwargs["mse"])
 
             # log the loss to wandb
