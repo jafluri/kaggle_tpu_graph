@@ -178,24 +178,44 @@ def train_tile_network(**kwargs):
         torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
 
         # validate the network
-        logger.info("Validating the network")
-        avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-            network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
-        )
-        # log everything
-        wandb.log({"val_loss": avg_loss})
-        wandb.log({"avg_slowdown": avg_slowdown})
-        logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
+        if kwargs["layout_network"]:
+            logger.info("Validating the network")
+            avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+                network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
+            )
+            # log everything
+            wandb.log({"val_loss": avg_loss})
+            wandb.log({"avg_kendall": avg_kendall})
+            logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
 
-        # test the network
-        logger.info("Testing the network")
-        avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-            network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
-        )
-        # log everything
-        wandb.log({"test_loss": avg_loss})
-        wandb.log({"avg_slowdown": avg_slowdown})
-        logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
+            # test the network
+            logger.info("Testing the network")
+            avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+                network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
+            )
+            # log everything
+            wandb.log({"test_loss": avg_loss})
+            wandb.log({"avg_kendall": avg_kendall})
+            logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
+        else:
+            logger.info("Validating the network")
+            avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
+                network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
+            )
+            # log everything
+            wandb.log({"val_loss": avg_loss})
+            wandb.log({"avg_slowdown": avg_slowdown})
+            logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
+
+            # test the network
+            logger.info("Testing the network")
+            avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
+                network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
+            )
+            # log everything
+            wandb.log({"test_loss": avg_loss})
+            wandb.log({"avg_slowdown": avg_slowdown})
+            logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
 
     # save the model
     logger.info("Saving the model")
