@@ -21,6 +21,12 @@ from tpu_graph.training import losses
     type=click.Path(dir_okay=True, file_okay=False),
     help="The path to save the model",
 )
+@click.option(
+    "--restore_path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, file_okay=True),
+    help="The path to restore the model",
+)
 @click.option("--learning_rate", type=float, default=0.001, help="The learning rate to use for training")
 @click.option(
     "--cosine_annealing_tmax",
@@ -73,7 +79,7 @@ def train_tile_network(**kwargs):
 
     # logger.info("Loading the dataset for validation")
     # val_dataset = TileDataset(base_path.joinpath("valid"))
-    # val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"])
+    # val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
@@ -91,6 +97,11 @@ def train_tile_network(**kwargs):
         nn.Linear(128, 1),
         nn.ReLU(),
     )
+
+    # restore the model if necessary
+    if kwargs["restore_path"] is not None:
+        logger.info("Restoring the model")
+        network.load_state_dict(torch.load(kwargs["restore_path"]))
 
     # network to GPU
     network = network.to("cuda")
