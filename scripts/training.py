@@ -40,7 +40,7 @@ import wandb
 @click.option(
     "--mse",
     is_flag=True,
-    help="If set, the mean squared error is used as loss function, " "otherwise the mean log squared error is used.",
+    help="If set, the mean squared error is used as loss function, otherwise the mean log squared error is used.",
 )
 @click.option(
     "--layout_network",
@@ -53,6 +53,12 @@ import wandb
     type=float,
     default=1.0,
     help="The probability to update the path in the network for a given graph during training",
+)
+@click.option(
+    "--fast_eval",
+    is_flag=True,
+    help="If set, we calculate the longest path only once and use it for all iterations of the same graph "
+    "during the evaluation",
 )
 def train_tile_network(**kwargs):
     # create a logger for the training
@@ -97,11 +103,11 @@ def train_tile_network(**kwargs):
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     logger.info("Loading the dataset for validation")
-    val_dataset = dataset_class(base_path.joinpath("valid"))
+    val_dataset = dataset_class(base_path.joinpath("valid"), cache=kwargs["cache"])
     val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     logger.info("Loading the dataset for testing")
-    test_dataset = dataset_class(base_path.joinpath("test"))
+    test_dataset = dataset_class(base_path.joinpath("test"), cache=kwargs["cache"])
     test_dataloader = test_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     # we build a super simple network for starters
@@ -181,7 +187,9 @@ def train_tile_network(**kwargs):
         if kwargs["layout_network"]:
             logger.info("Validating the network")
             avg_loss, avg_kendall = evaluation.evaluate_layout_network(
-                network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
+                network,
+                val_dataloader,
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz", fast_eval=kwargs["fast_eval"]),
             )
             # log everything
             wandb.log({"val_loss": avg_loss})
@@ -191,7 +199,9 @@ def train_tile_network(**kwargs):
             # test the network
             logger.info("Testing the network")
             avg_loss, avg_kendall = evaluation.evaluate_layout_network(
-                network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
+                network,
+                test_dataloader,
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz", fast_eval=kwargs["fast_eval"]),
             )
             # log everything
             wandb.log({"test_loss": avg_loss})
@@ -200,7 +210,9 @@ def train_tile_network(**kwargs):
         else:
             logger.info("Validating the network")
             avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-                network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
+                network,
+                val_dataloader,
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz", fast_eval=kwargs["fast_eval"]),
             )
             # log everything
             wandb.log({"val_loss": avg_loss})
@@ -210,7 +222,9 @@ def train_tile_network(**kwargs):
             # test the network
             logger.info("Testing the network")
             avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-                network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
+                network,
+                test_dataloader,
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz", fast_eval=kwargs["fast_eval"]),
             )
             # log everything
             wandb.log({"test_loss": avg_loss})

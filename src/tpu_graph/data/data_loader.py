@@ -2,7 +2,6 @@ import os
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
-from uuid import uuid4
 import numba as nb
 import numpy as np
 import torch
@@ -177,6 +176,7 @@ class TileDataset(TPUGraphDataset):
         """
 
         # read out the data
+        filename = data.zip.filename
         data = {k: v for k, v in data.items()}
 
         # read out the data for this graph
@@ -194,9 +194,9 @@ class TileDataset(TPUGraphDataset):
         new_edges = np.fliplr(new_edges).copy()
         data["edge_index"] = new_edges
 
-        # create the graph
+        # create the graph, name it after the file name such that it has a unique name
         graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
-        graph["name"] = str(uuid4())
+        graph["name"] = filename
         data["graph"] = graph
 
         return data
@@ -245,6 +245,7 @@ class LayoutDataset(TPUGraphDataset):
         """
 
         # read out the data
+        filename = data.zip.filename
         data = {k: v for k, v in data.items()}
 
         # read out the data for this graph
@@ -262,9 +263,9 @@ class LayoutDataset(TPUGraphDataset):
         new_edges = np.fliplr(new_edges).copy()
         data["edge_index"] = new_edges
 
-        # create the graph
+        # create the graph, name it after the file name such that it has a unique name
         graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
-        graph["name"] = str(uuid4())
+        graph["name"] = filename
         data["graph"] = graph
 
         return data
