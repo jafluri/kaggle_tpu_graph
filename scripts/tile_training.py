@@ -114,6 +114,10 @@ def train_tile_network(**kwargs):
     if kwargs["cosine_annealing_tmax"] > 0:
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001)
 
+    # create the saving path
+    save_path = Path(kwargs["save_path"])
+    save_path.mkdir(parents=True, exist_ok=True)
+
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
@@ -144,10 +148,12 @@ def train_tile_network(**kwargs):
                 optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001
             )
 
+        # save the network for this epoch
+        logger.info("Saving the model")
+        torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
+
     # save the model
     logger.info("Saving the model")
-    save_path = Path(kwargs["save_path"])
-    save_path.mkdir(parents=True, exist_ok=True)
     torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))
 
 
