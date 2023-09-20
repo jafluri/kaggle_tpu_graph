@@ -118,7 +118,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             with np.load(self.file_list[file_idx]) as data:
                 data = self.read_data(data)
 
-        return offset, data
+        return data, offset
 
     def __len__(self):
         """
