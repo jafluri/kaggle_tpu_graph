@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -27,16 +28,17 @@ def evaluate_tile_network(
     predictions = []
     labels = []
     loss_vals = []
-    for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
-        # eval the network
-        pred_runtimes = network.accumulate_runtime(features, edges, graphs)
-        predictions.append(np.array([p.cpu().detach().numpy() for p in pred_runtimes]))
-        labels.append(np.array([r.cpu().detach().numpy() for r in runtimes]))
+    with torch.no_grad():
+        for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
+            # eval the network
+            pred_runtimes = network.accumulate_runtime(features, edges, graphs)
+            predictions.append(np.array([p.cpu().detach().numpy() for p in pred_runtimes]))
+            labels.append(np.array([r.cpu().detach().numpy() for r in runtimes]))
 
-        # calculate the loss and log it
-        loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=True)
-        loss_vals.append(loss.item())
-        pbar.set_postfix({"loss": loss.item()})
+            # calculate the loss and log it
+            loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=True)
+            loss_vals.append(loss.item())
+            pbar.set_postfix({"loss": loss.item()})
 
     # the average loss
     avg_loss = np.mean(loss_vals)
