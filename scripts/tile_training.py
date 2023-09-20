@@ -22,6 +22,12 @@ from tpu_graph.training import losses
     help="The path to save the model",
 )
 @click.option("--learning_rate", type=float, default=0.001, help="The learning rate to use for training")
+@click.option(
+    "--cosine_annealing_tmax",
+    type=int,
+    default=0,
+    help="The number of steps for the cosine annealing, if 0, no cosine annealing is used",
+)
 @click.option("--epochs", type=int, default=1, help="The number of epochs to train")
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
 @click.option("--cache", is_flag=True, help="If set, the dataset is cached in memory")
@@ -92,6 +98,11 @@ def train_tile_network(**kwargs):
     # get the optimizer
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"])
 
+    # get the scheduler
+    scheduler = None
+    if kwargs["cosine_annealing_tmax"] > 0:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001)
+
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
@@ -110,6 +121,17 @@ def train_tile_network(**kwargs):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+            # step the scheduler
+            if scheduler is not None:
+                wandb.log({"lr": scheduler.get_last_lr()[0]})
+                scheduler.step()
+
+        # reset the scheduler
+        if scheduler is not None:
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001
+            )
 
     # save the model
     logger.info("Saving the model")

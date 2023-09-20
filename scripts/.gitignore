@@ -1,3 +1,8 @@
 # the log dir for wandb
 wandb/
+
+# other logs
 logs/
+
+# saved models
+models/
