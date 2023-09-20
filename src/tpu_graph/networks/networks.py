@@ -31,11 +31,13 @@ class TPUGraphNetwork(nn.Sequential):
         :return: The predicted runtime in nanoseconds
         """
 
-        # apply the sequential network for each element in the list
-        node_runtimes = []
-        for f in features:
-            node_runtimes.append(super().forward(f))
-        return node_runtimes
+        # we concat everything and split again for efficiency
+        lengths = [f.shape[0] for f in features]
+        features = torch.cat(features, dim=0)
+        runtimes = super().forward(features)
+        runtimes = torch.split(runtimes, lengths, dim=0)
+
+        return runtimes
 
     def accumulate_runtime(
         self,
