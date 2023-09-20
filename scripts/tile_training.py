@@ -125,6 +125,7 @@ def train_tile_network(**kwargs):
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
+        logger.info(f"Starting epoch {epoch}")
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
         for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
             pred_runtimes = network.accumulate_runtime(features, edges, graphs)
