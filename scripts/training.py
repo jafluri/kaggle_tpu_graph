@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 import torch
 from torch import optim, nn
-from tpu_graph.data import TileDataset
+from tpu_graph.data import TileDataset, LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork
 from tpu_graph.training import losses, evaluation
 from tqdm import tqdm
@@ -82,16 +82,19 @@ def train_tile_network(**kwargs):
     # load the dataset
     base_path = Path(kwargs["data_path"])
 
+    # get the dataset class
+    dataset_class = LayoutDataset if kwargs["layout_network"] else TileDataset
+
     logger.info("Loading the dataset for training")
-    train_dataset = TileDataset(base_path.joinpath("train"), cache=kwargs["cache"])
+    train_dataset = dataset_class(base_path.joinpath("train"), cache=kwargs["cache"])
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     logger.info("Loading the dataset for validation")
-    val_dataset = TileDataset(base_path.joinpath("valid"))
+    val_dataset = dataset_class(base_path.joinpath("valid"))
     val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     logger.info("Loading the dataset for testing")
-    test_dataset = TileDataset(base_path.joinpath("test"))
+    test_dataset = dataset_class(base_path.joinpath("test"))
     test_dataloader = test_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     # we build a super simple network for starters
