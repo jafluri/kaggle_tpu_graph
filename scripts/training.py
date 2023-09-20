@@ -189,7 +189,8 @@ def train_tile_network(**kwargs):
             avg_loss, avg_kendall = evaluation.evaluate_layout_network(
                 network,
                 val_dataloader,
-                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz", fast_eval=kwargs["fast_eval"]),
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
+                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"val_loss": avg_loss})
@@ -201,7 +202,8 @@ def train_tile_network(**kwargs):
             avg_loss, avg_kendall = evaluation.evaluate_layout_network(
                 network,
                 test_dataloader,
-                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz", fast_eval=kwargs["fast_eval"]),
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
+                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"test_loss": avg_loss})
@@ -212,7 +214,8 @@ def train_tile_network(**kwargs):
             avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
                 network,
                 val_dataloader,
-                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz", fast_eval=kwargs["fast_eval"]),
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
+                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"val_loss": avg_loss})
@@ -224,7 +227,8 @@ def train_tile_network(**kwargs):
             avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
                 network,
                 test_dataloader,
-                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz", fast_eval=kwargs["fast_eval"]),
+                save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
+                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"test_loss": avg_loss})
