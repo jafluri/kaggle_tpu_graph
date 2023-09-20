@@ -31,7 +31,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(self.data_path.glob("*.npz"))
+            file_list = sorted(path.glob("*.npz"))[:3]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
