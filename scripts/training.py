@@ -48,6 +48,12 @@ import wandb
     help="If set, the layout network is trained, this changes the input dimension from 165 (tile network) "
     "to 159 (layout network)",
 )
+@click.option(
+    "--p_update_path",
+    type=float,
+    default=1.0,
+    help="The probability to update the path in the network for a given graph during training",
+)
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -73,6 +79,7 @@ def train_tile_network(**kwargs):
             "cosine_annealing_tmax": kwargs["cosine_annealing_tmax"],
             "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
             "loss_type": "MSE" if kwargs["mse"] else "Log MSE",
+            "p_update_path": kwargs["p_update_path"],
         },
     )
 
@@ -141,7 +148,7 @@ def train_tile_network(**kwargs):
         logger.info(f"Starting epoch {epoch}")
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
         for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
-            pred_runtimes = network.accumulate_runtime(features, edges, graphs)
+            pred_runtimes = network.accumulate_runtime(features, edges, graphs, kwargs["p_update_path"])
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=not kwargs["mse"])
 
             # log the loss to wandb

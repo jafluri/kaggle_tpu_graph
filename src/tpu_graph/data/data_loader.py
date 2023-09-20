@@ -2,6 +2,7 @@ import os
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
+from uuid import uuid4
 import numba as nb
 import numpy as np
 import torch
@@ -25,7 +26,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # get all the files
         self.data_path = Path(data_path)
-        self.file_list = sorted(self.data_path.glob("*.npz"))
+        self.file_list = sorted(self.data_path.glob("*.npz"))[:50]
         logger.info(f"Found {len(self.file_list)} files in {self.data_path}")
 
         # we need open all files once to get the size of the dataset
@@ -195,6 +196,7 @@ class TileDataset(TPUGraphDataset):
 
         # create the graph
         graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
+        graph["name"] = str(uuid4())
         data["graph"] = graph
 
         return data
@@ -262,6 +264,7 @@ class LayoutDataset(TPUGraphDataset):
 
         # create the graph
         graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
+        graph["name"] = str(uuid4())
         data["graph"] = graph
 
         return data
