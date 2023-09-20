@@ -10,16 +10,20 @@ class TPUGraphNetwork(nn.Sequential):
     A simple network used for the tile predictions
     """
 
-    def __init__(self, *args):
+    def __init__(self, *args, exp: bool = False, **kwargs):
         """
         Inits the network in the same way as the sequential network
         The network should take as an input a list of tensors with shape (n_nodes, n_features) and output a tensor with
         shape (n_nodes, 1) containing the predicted runtime in nanoseconds
         :param args: args for the sequential network, e.g. layers
+        :param exp: If True, the runtime is taken as the exponential of the output of the network
         """
 
         # dict for the paths
         self.path_dict = dict()
+
+        # save the exp flag
+        self.exp = exp
 
         # init the sequential network
         super().__init__(*args)
@@ -35,6 +39,8 @@ class TPUGraphNetwork(nn.Sequential):
         lengths = [f.shape[0] for f in features]
         features = torch.cat(features, dim=0)
         runtimes = super().forward(features)
+        if self.exp:
+            runtimes = torch.exp(runtimes)
         runtimes = torch.split(runtimes, lengths, dim=0)
 
         return runtimes

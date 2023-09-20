@@ -66,6 +66,7 @@ import wandb
     help="If set, we calculate the longest path only once and use it for all iterations of the same graph "
     "during the evaluation",
 )
+@click.option("--exp_pred", is_flag=True, help="If set, the prediction is taken as the exponential of the output")
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -132,6 +133,7 @@ def train_tile_network(**kwargs):
         nn.SiLU(),
         nn.Linear(128, 1),
         nn.ReLU(),
+        exp=kwargs["exp_pred"],
     )
 
     # restore the model if necessary
