@@ -68,15 +68,20 @@ def train_tile_network(**kwargs):
     network = TileNetwork(
         nn.Linear(165, 256),
         nn.SiLU(),
+        nn.Linear(256, 256),
+        nn.SiLU(),
         nn.Linear(256, 128),
         nn.SiLU(),
-        nn.Linear(128, 64),
+        nn.Linear(128, 128),
         nn.SiLU(),
-        nn.Linear(64, 16),
+        nn.Linear(128, 128),
         nn.SiLU(),
-        nn.Linear(16, 1),
+        nn.Linear(128, 1),
         nn.ReLU(),
     )
+
+    # network to GPU
+    network = network.to("cuda")
 
     # get the optimizer
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"])

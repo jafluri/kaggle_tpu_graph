@@ -98,11 +98,12 @@ class TileDataset(Dataset):
         return self.length
 
     @staticmethod
-    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
+    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32, device="cuda"):
         """
         A custom collate function for the tiles dataset
         :param tensors: A list of tuples that are returned by the dataset
         :param dtype: The dtype to use for the tensors
+        :param device: The device to put the tensors on
         :return: The collated output for the dataloader
         """
 
@@ -117,10 +118,10 @@ class TileDataset(Dataset):
             node_feat, config_runtime, edge_index = t
 
             # append the tensors that need to go through the network
-            features.append(torch.tensor(node_feat, dtype=dtype))
-            times.append(torch.tensor(config_runtime, dtype=dtype))
+            features.append(torch.tensor(node_feat, dtype=dtype).to(device))
+            times.append(torch.tensor(config_runtime, dtype=dtype).to(device))
             # the edge index needs to be int32
-            edge_indices.append(torch.tensor(edge_index, dtype=torch.int32))
+            edge_indices.append(torch.tensor(edge_index, dtype=torch.int32).to(device))
 
         return features, times, edge_indices
 

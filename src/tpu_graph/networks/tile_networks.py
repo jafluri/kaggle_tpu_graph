@@ -49,8 +49,8 @@ class TileNetwork(nn.Sequential):
         accumulated_runtimes = []
         for runtimes, feat, edges in zip(node_runtimes, features, edge_indices):
             # we need to flip the edges because of the different definition of the edge index
-            edges = np.fliplr(edges.numpy())
-            runtime_numpy = runtimes.detach().numpy()
+            edges = np.fliplr(edges.cpu().numpy())
+            runtime_numpy = runtimes.cpu().detach().numpy()
 
             # create the graph
             graph = Graph(n=len(runtime_numpy) + 1, edges=edges, directed=True)
@@ -70,8 +70,9 @@ class TileNetwork(nn.Sequential):
             # now we create the accumulation vector
             accumulate_vec = np.zeros_like(runtime_numpy)
             accumulate_vec[shortest_path] = 1.0
+            accumulate_vec = torch.tensor(accumulate_vec, dtype=torch.float32).to(runtimes.device)
 
             # accumulate the runtimes
-            accumulated_runtimes.append((runtimes * torch.tensor(accumulate_vec, dtype=torch.float32)).sum())
+            accumulated_runtimes.append((runtimes * accumulate_vec).sum())
 
         return accumulated_runtimes
