@@ -35,10 +35,9 @@ import wandb
 )
 @click.option("--learning_rate", type=float, default=0.001, help="The learning rate to use for training")
 @click.option(
-    "--cosine_annealing_tmax",
-    type=int,
-    default=0,
-    help="The number of steps for the cosine annealing, if 0, no cosine annealing is used",
+    "--cosine_annealing",
+    is_flag=True,
+    help="If set, the learning rate is annealed using the cosine annealing scheduler",
 )
 @click.option("--epochs", type=int, default=1, help="The number of epochs to train")
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
@@ -89,7 +88,7 @@ def train_tile_network(**kwargs):
             "dataset": "Tiles Dataset of the TPU Graph Benchmark",
             "epochs": kwargs["epochs"],
             "batch_size": kwargs["batch_size"],
-            "cosine_annealing_tmax": kwargs["cosine_annealing_tmax"],
+            "cosine_annealing": kwargs["cosine_annealing"],
             "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
             "loss_type": "MSE" if kwargs["mse"] else "Log MSE",
             "p_update_path": kwargs["p_update_path"],
@@ -155,7 +154,8 @@ def train_tile_network(**kwargs):
     # get the scheduler
     scheduler = None
     if kwargs["cosine_annealing_tmax"] > 0:
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001)
+        t_max = len(train_dataloader)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, t_max, eta_min=1e-6)
 
     # create the saving path
     save_path = Path(kwargs["save_path"])
@@ -186,12 +186,6 @@ def train_tile_network(**kwargs):
 
             # log the summaries
             wandb.log(summaries)
-
-        # reset the scheduler
-        if scheduler is not None:
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, kwargs["cosine_annealing_tmax"], eta_min=0.000001
-            )
 
         # save the network for this epoch
         logger.info("Saving the model")
