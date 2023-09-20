@@ -26,7 +26,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # get all the files
         self.data_path = Path(data_path)
-        self.file_list = sorted(self.data_path.glob("*.npz"))[:50]
+        self.file_list = sorted(self.data_path.glob("*.npz"))
         logger.info(f"Found {len(self.file_list)} files in {self.data_path}")
 
         # we need open all files once to get the size of the dataset
