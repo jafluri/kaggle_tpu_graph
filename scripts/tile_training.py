@@ -3,14 +3,14 @@ import sys
 from pathlib import Path
 
 import click
-import wandb
 import torch
 from torch import optim, nn
-from tqdm import tqdm
-
 from tpu_graph.data import TileDataset
 from tpu_graph.networks.tile_networks import TileNetwork
-from tpu_graph.training import losses
+from tpu_graph.training import losses, evaluation
+from tqdm import tqdm
+
+import wandb
 
 
 @click.command()
@@ -77,9 +77,13 @@ def train_tile_network(**kwargs):
     train_dataset = TileDataset(base_path.joinpath("train"), cache=kwargs["cache"])
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
-    # logger.info("Loading the dataset for validation")
-    # val_dataset = TileDataset(base_path.joinpath("valid"))
-    # val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
+    logger.info("Loading the dataset for validation")
+    val_dataset = TileDataset(base_path.joinpath("valid"))
+    val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
+
+    logger.info("Loading the dataset for testing")
+    test_dataset = TileDataset(base_path.joinpath("test"))
+    test_dataloader = test_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
@@ -151,6 +155,26 @@ def train_tile_network(**kwargs):
         # save the network for this epoch
         logger.info("Saving the model")
         torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
+
+        # validate the network
+        logger.info("Validating the network")
+        avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
+            network, val_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz")
+        )
+        # log everything
+        wandb.log({"val_loss": avg_loss})
+        wandb.log({"avg_slowdown": avg_slowdown})
+        logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
+
+        # test the network
+        logger.info("Testing the network")
+        avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
+            network, test_dataloader, save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz")
+        )
+        # log everything
+        wandb.log({"test_loss": avg_loss})
+        wandb.log({"avg_slowdown": avg_slowdown})
+        logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
 
     # save the model
     logger.info("Saving the model")
