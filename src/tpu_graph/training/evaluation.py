@@ -87,7 +87,7 @@ def evaluate_tile_network(
             offsets=dataset.offsets,
             file_list=np.array([str(f) for f in dataset.file_list]),
             slowdowns=slowdowns,
-            top_ks=top_ks,
+            top_ks=np.array(top_ks, dtype=object),
         )
 
     # return the average loss and slowdown
@@ -142,7 +142,7 @@ def evaluate_layout_network(
             offsets=dataset.offsets,
             file_list=np.array([str(f) for f in dataset.file_list]),
             kendalls=np.array(kendalls),
-            rankings=rankings,
+            rankings=np.array(rankings, dtype=object),
         )
 
     # return the average loss and Kendall's Tau
