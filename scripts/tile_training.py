@@ -15,7 +15,12 @@ from tpu_graph.training import losses
 
 @click.command()
 @click.option("--data_path", type=click.Path(exists=True, dir_okay=True, file_okay=False), help="The path to the data")
-@click.option("--save_path", type=click.Path(dir_okay=True, file_okay=False), help="The path to save the model")
+@click.option(
+    "--save_path",
+    default=Path("./models"),
+    type=click.Path(dir_okay=True, file_okay=False),
+    help="The path to save the model",
+)
 @click.option("--learning_rate", type=float, default=0.001, help="The learning rate to use for training")
 @click.option("--epochs", type=int, default=1, help="The number of epochs to train")
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
@@ -46,6 +51,7 @@ def train_tile_network(**kwargs):
             "learning_rate": kwargs["learning_rate"],
             "dataset": "Tiles Dataset of the TPU Graph Benchmark",
             "epochs": kwargs["epochs"],
+            "batch_size": kwargs["batch_size"],
         },
     )
 
