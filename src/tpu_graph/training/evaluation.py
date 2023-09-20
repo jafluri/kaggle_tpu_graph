@@ -5,10 +5,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from . import losses
-from ..networks.tile_networks import TileNetwork
+from ..networks.networks import TPUGraphNetwork
 
 
-def evaluate_tile_network(network: TileNetwork, dataloader: DataLoader, save_path: str | bytes | os.PathLike = None):
+def evaluate_tile_network(
+    network: TPUGraphNetwork, dataloader: DataLoader, save_path: str | bytes | os.PathLike = None
+):
     """
     Evaluates the tile network on the given dataloader
     :param network: The network to evaluate

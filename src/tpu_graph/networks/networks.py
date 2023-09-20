@@ -5,7 +5,7 @@ import numpy as np
 from igraph import Graph
 
 
-class TileNetwork(nn.Sequential):
+class TPUGraphNetwork(nn.Sequential):
     """
     A simple network used for the tile predictions
     """

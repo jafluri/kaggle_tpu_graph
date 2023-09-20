@@ -6,7 +6,7 @@ import click
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset
-from tpu_graph.networks.tile_networks import TileNetwork
+from tpu_graph.networks import TPUGraphNetwork
 from tpu_graph.training import losses, evaluation
 from tqdm import tqdm
 
@@ -42,6 +42,12 @@ import wandb
     is_flag=True,
     help="If set, the mean squared error is used as loss function, " "otherwise the mean log squared error is used.",
 )
+@click.option(
+    "--layout_network",
+    is_flag=True,
+    help="If set, the layout network is trained, this changes the input dimension from 165 (tile network) "
+    "to 159 (layout network)",
+)
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -64,6 +70,9 @@ def train_tile_network(**kwargs):
             "dataset": "Tiles Dataset of the TPU Graph Benchmark",
             "epochs": kwargs["epochs"],
             "batch_size": kwargs["batch_size"],
+            "cosine_annealing_tmax": kwargs["cosine_annealing_tmax"],
+            "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
+            "loss_type": "MSE" if kwargs["mse"] else "Log MSE",
         },
     )
 
@@ -87,8 +96,9 @@ def train_tile_network(**kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    network = TileNetwork(
-        nn.Linear(165, 256),
+    input_dim = 159 if kwargs["layout_network"] else 165
+    network = TPUGraphNetwork(
+        nn.Linear(input_dim, 256),
         nn.SiLU(),
         nn.Linear(256, 256),
         nn.SiLU(),
