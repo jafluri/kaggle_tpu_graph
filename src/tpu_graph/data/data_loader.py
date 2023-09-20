@@ -16,17 +16,24 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
     This is a base class for all datasets that are used in the TPUGraph project
     """
 
-    def __init__(self, data_path: str | bytes | os.PathLike, cache=False):
+    def __init__(self, data_path: str | bytes | os.PathLike | list[str | bytes | os.PathLike], cache=False):
         """
         Inits the dataset with a directory containing the NPZ files
-        :param data_path: The directory containing the NPZ files used for the training of the tiles network
+        :param data_path: The directory containing the NPZ files that will be loaded, can also be a list of directories
         :param cache: If True, the dataset is cached in memory
         """
 
         # get all the files
-        self.data_path = Path(data_path)
-        self.file_list = sorted(self.data_path.glob("*.npz"))
-        logger.info(f"Found {len(self.file_list)} files in {self.data_path}")
+        if not isinstance(data_path, list):
+            data_path = [data_path]
+        self.data_path = sorted([Path(p) for p in data_path])
+
+        # get all the files
+        self.file_list = []
+        for path in self.data_path:
+            file_list = sorted(self.data_path.glob("*.npz"))
+            logger.info(f"Found {len(file_list)} files in {path}")
+            self.file_list.extend(file_list)
 
         # we need open all files once to get the size of the dataset
         logger.info("Loading all files to get the size of the dataset")
