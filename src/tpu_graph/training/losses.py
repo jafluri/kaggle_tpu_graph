@@ -42,8 +42,7 @@ def slowdown(pred: list[np.ndarray], label: list[np.ndarray], k: int = 5):
         slowdown = 2 - np.min(l[top_k]) / np.min(l)
         slowdowns.append(slowdown)
 
-    # to numpy
-    top_ks = np.array(top_ks)
+    # to numpy (we don't transform the top k since they might not always have full length
     slowdowns = np.array(slowdowns)
 
     return slowdowns, top_ks
