@@ -153,7 +153,7 @@ def train_tile_network(**kwargs):
 
     # get the scheduler
     scheduler = None
-    if kwargs["cosine_annealing_tmax"] > 0:
+    if kwargs["cosine_annealing"]:
         t_max = len(train_dataloader)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, t_max, eta_min=1e-6)
 
