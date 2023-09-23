@@ -5,6 +5,43 @@ import numpy as np
 from igraph import Graph
 
 
+class EmeddingInputLayer(nn.Module):
+    """
+    This is just a layer that splits of the first column of the input and embeds it
+    """
+
+    def __init__(self, emb_size: int = 32, num_embeddings: int = 128):
+        """
+        Inits the layer
+        :param emb_size: The size of the embedding
+        """
+
+        # this line is mandatory for all subclasses
+        super().__init__()
+
+        # save the attributes
+        self.emb_size = emb_size
+        self.num_embeddings = num_embeddings
+
+        # init the embedding
+        self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass of the layer
+        :param x: The input tensor
+        :return: The input tensor with the first column embedded
+        """
+
+        # get the first column and convert to int
+        op_code = x[:, 0].long()
+
+        # embed the first column
+        embedding = self.emb(op_code)
+
+        return torch.concatenate([embedding, x[:, 1:]], dim=1)
+
+
 class TPUGraphNetwork(nn.Sequential):
     """
     A simple network used for the tile predictions
@@ -22,7 +59,7 @@ class TPUGraphNetwork(nn.Sequential):
         # dict for the paths
         self.path_dict = dict()
 
-        # save the exp flag
+        # save attributes
         self.exp = exp
 
         # init the sequential network

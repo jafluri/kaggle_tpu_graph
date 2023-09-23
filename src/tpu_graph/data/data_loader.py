@@ -31,7 +31,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))
+            file_list = sorted(path.glob("*.npz"))[:2]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -233,7 +233,7 @@ class TileDataset(TPUGraphDataset):
 
         # tile config_features such that axis 0 matches with the number of nodes
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
-        features = np.concatenate([node_feat, node_opcode[:, None], config_feat], axis=1)
+        features = np.concatenate([node_opcode[:, None], node_feat, config_feat], axis=1)
 
         return features, config_runtime, edge_index, graph
 
@@ -304,6 +304,6 @@ class LayoutDataset(TPUGraphDataset):
         config_runtime = data["config_runtime"][offset]
 
         # tile config_features such that axis 0 matches with the number of nodes
-        features = np.concatenate([node_feat, node_opcode[:, None], config_feat], axis=1)
+        features = np.concatenate([node_opcode[:, None], node_feat, config_feat], axis=1)
 
         return features, config_runtime, edge_index, graph

@@ -6,7 +6,7 @@ import click
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork
+from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer
 from tpu_graph.training import losses, evaluation
 from tqdm import tqdm
 
@@ -119,7 +119,10 @@ def train_tile_network(**kwargs):
     # we build a super simple network for starters
     logger.info("Building the network")
     input_dim = 159 if kwargs["layout_network"] else 165
+    # deal with the embedding
+    input_dim += 31
     network = TPUGraphNetwork(
+        EmeddingInputLayer(),
         nn.Linear(input_dim, 256),
         nn.SiLU(),
         nn.LayerNorm(256),
