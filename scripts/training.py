@@ -121,25 +121,26 @@ def train_tile_network(**kwargs):
     input_dim = 159 if kwargs["layout_network"] else 165
     # deal with the embedding
     input_dim += 31
-    network = TPUGraphNetwork(
-        EmeddingInputLayer(),
-        nn.Linear(input_dim, 256),
+    embedding_layer = EmeddingInputLayer()
+    projection_network = nn.Sequential(
+        nn.Linear(input_dim, 256), nn.SiLU(), nn.Linear(256, 128), nn.LayerNorm(128), nn.Linear(128, 64), nn.SiLU()
+    )
+    graph_embedding_network = nn.Sequential(
+        nn.Linear(input_dim + 64, 256),
         nn.SiLU(),
-        nn.LayerNorm(256),
-        nn.Linear(256, 256),
-        nn.SiLU(),
-        nn.LayerNorm(256),
         nn.Linear(256, 128),
-        nn.SiLU(),
         nn.LayerNorm(128),
-        nn.Linear(128, 128),
+        nn.Linear(128, 64),
         nn.SiLU(),
-        nn.LayerNorm(128),
-        nn.Linear(128, 128),
-        nn.SiLU(),
-        nn.LayerNorm(128),
-        nn.Linear(128, 1),
+        nn.LayerNorm(64),
+        nn.Linear(64, 1),
         nn.ReLU(),
+    )
+
+    network = TPUGraphNetwork(
+        embedding_layer=embedding_layer,
+        projection_network=projection_network,
+        graph_embedding_network=graph_embedding_network,
         exp=kwargs["exp_pred"],
     )
 
@@ -169,8 +170,10 @@ def train_tile_network(**kwargs):
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
-        for batch_idx, (features, runtimes, edges, graphs) in enumerate(pbar):
-            pred_runtimes = network.accumulate_runtime(features, edges, graphs, kwargs["p_update_path"])
+        for batch_idx, (features, runtimes, edges, connection_matrices, graphs) in enumerate(pbar):
+            pred_runtimes = network.accumulate_runtime(
+                features, edges, connection_matrices, graphs, kwargs["p_update_path"]
+            )
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=not kwargs["mse"])
             summaries = {"loss": loss.item()}
 

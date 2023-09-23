@@ -42,40 +42,68 @@ class EmeddingInputLayer(nn.Module):
         return torch.concatenate([embedding, x[:, 1:]], dim=1)
 
 
-class TPUGraphNetwork(nn.Sequential):
+class TPUGraphNetwork(nn.Module):
     """
     A simple network used for the tile predictions
     """
 
-    def __init__(self, *args, exp: bool = False, **kwargs):
+    def __init__(
+        self,
+        embedding_layer: EmeddingInputLayer,
+        projection_network: nn.Sequential,
+        graph_embedding_network: nn.Sequential,
+        exp: bool = False,
+        **kwargs,
+    ):
         """
-        Inits the network in the same way as the sequential network
-        The network should take as an input a list of tensors with shape (n_nodes, n_features) and output a tensor with
-        shape (n_nodes, 1) containing the predicted runtime in nanoseconds
-        :param args: args for the sequential network, e.g. layers
-        :param exp: If True, the runtime is taken as the exponential of the output of the network
+        Init the network
+        :param embedding_layer: A layer that embeds the first column of the input for the op code
+        :param projection_network: The network that projects the input to the correct size
+        :param graph_embedding_network: Network that takes the projections and features and embeds them
+        :param exp: Exponentiate the output (makes stuff additive in the loss)
+        :param kwargs: Additional arguments for the super class
         """
+
+        # init the super class
+        super().__init__(**kwargs)
+
+        # save attributes
+        self.embedding_layer = embedding_layer
+        self.projection_network = projection_network
+        self.graph_embedding_network = graph_embedding_network
+        self.exp = exp
 
         # dict for the paths
         self.path_dict = dict()
 
-        # save attributes
-        self.exp = exp
-
-        # init the sequential network
-        super().__init__(*args)
-
-    def forward(self, features: list[torch.Tensor]):
+    def forward(self, features: list[torch.Tensor], connection_matrices: list[torch.Tensor]):
         """
         Forward pass of the network
         :param features: A list of tensors with shape (n_nodes, n_features)
+
         :return: The predicted runtime in nanoseconds
         """
 
         # we concat everything and split again for efficiency
         lengths = [f.shape[0] for f in features]
         features = torch.cat(features, dim=0)
-        runtimes = super().forward(features)
+
+        # embed the first column
+        emb_features = self.embedding_layer(features)
+
+        # project the features
+        pro_features = self.projection_network(emb_features)
+
+        # split again
+        pro_features = torch.split(pro_features, lengths, dim=0)
+        # accumulate the projection according to the connection matrices
+        pro_features = [torch.matmul(cm, f) for cm, f in zip(connection_matrices, pro_features)]
+
+        # embed the graph to rutimes
+        features = torch.cat(pro_features, dim=0)
+        features = torch.cat([features, emb_features], dim=1)
+        runtimes = self.graph_embedding_network(features)
+
         if self.exp:
             runtimes = torch.exp(runtimes)
         runtimes = torch.split(runtimes, lengths, dim=0)
@@ -86,6 +114,7 @@ class TPUGraphNetwork(nn.Sequential):
         self,
         features: list[torch.Tensor],
         edge_indices: list[torch.Tensor],
+        connection_matrices: list[torch.Tensor],
         graphs: list[Graph],
         p_update_path: float = 1.0,
     ):
@@ -93,6 +122,7 @@ class TPUGraphNetwork(nn.Sequential):
         Calls the network on the features and accumulates the runtime over the graph defined by the edge_indices
         :param features: A list of tensors with shape (n_nodes, n_features)
         :param edge_indices: A list of tensors with shape (n_edges, 2)
+        :param connection_matrices: A list of tensors with shape (n_nodes, n_nodes)
         :param graphs: A list of graphs
         :param p_update_path: The probability to update the longest path for a given graph. Defaults to 1.0 (always).
                               Reducing this value can speed up the runtime but also reduces the accuracy as
@@ -101,11 +131,13 @@ class TPUGraphNetwork(nn.Sequential):
         """
 
         # get the runtimes
-        node_runtimes = self(features)
+        node_runtimes = self(features, connection_matrices)
 
         # accumulate the runtimes
         accumulated_runtimes = []
-        for runtimes, feat, edges, graph in zip(node_runtimes, features, edge_indices, graphs):
+        for runtimes, feat, edges, connection_matrix, graph in zip(
+            node_runtimes, features, edge_indices, connection_matrices, graphs
+        ):
             if graph["name"] not in self.path_dict or np.random.uniform() < p_update_path:
                 # detach and copy everything to cpu
                 edges = edges.cpu().numpy()

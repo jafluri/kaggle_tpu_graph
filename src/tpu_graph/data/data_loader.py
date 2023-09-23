@@ -16,12 +16,24 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
     This is a base class for all datasets that are used in the TPUGraph project
     """
 
-    def __init__(self, data_path: str | bytes | os.PathLike | list[str | bytes | os.PathLike], cache=False):
+    def __init__(
+        self,
+        data_path: str | bytes | os.PathLike | list[str | bytes | os.PathLike],
+        cache=False,
+        cutoff: int = 3,
+        decay: float = 0.5,
+    ):
         """
         Inits the dataset with a directory containing the NPZ files
         :param data_path: The directory containing the NPZ files that will be loaded, can also be a list of directories
         :param cache: If True, the dataset is cached in memory
+        :param cutoff: The cutoff for the shortest path connection matrix
+        :param decay: The decay for the shortest path connection matrix
         """
+
+        # save the attributes
+        self.cutoff = cutoff
+        self.decay = decay
 
         # get all the files
         if not isinstance(data_path, list):
@@ -31,7 +43,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))[:2]
+            file_list = sorted(path.glob("*.npz"))
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -66,28 +78,29 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         features = []
         times = []
         edge_indices = []
+        connection_matrices = []
         graphs = []
 
         # unpack everything
         for t in tensors:
-            assert len(t) == 4, "The length of the tensors must be 4"
-            node_feat, config_runtime, edge_index, graph = t
+            assert len(t) == 5, "The length of the tensors must be 5"
+            node_feat, config_runtime, edge_index, connection_matrix, graph = t
 
             # append the tensors that need to go through the network
             features.append(torch.tensor(node_feat, dtype=dtype).to(device))
             times.append(torch.tensor(config_runtime, dtype=dtype).to(device))
+            connection_matrices.append(connection_matrix.type(dtype).to(device))
             # the edge index needs to be int32
             edge_indices.append(torch.tensor(edge_index, dtype=torch.int32))
             graphs.append(graph)
 
-        return features, times, edge_indices, graphs
+        return features, times, edge_indices, connection_matrices, graphs
 
-    def get_dataloader(self, batch_size: int, shuffle: bool = True, num_workers: int = 0, pin_memory: bool = False):
+    def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False):
         """
         Returns a dataloader for the dataset
         :param batch_size: The batch size to use
         :param shuffle: If True, the dataset is shuffled
-        :param num_workers: The number of workers to use for the dataloader
         :param pin_memory: If True, the memory is pinned
         :return: The dataloader
         """
@@ -96,7 +109,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             self,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers,
             pin_memory=pin_memory,
             collate_fn=self.collate_fn_tiles,
         )
@@ -127,6 +139,80 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         return data, offset
 
+    def add_imaginary_output_node(self, node_feat: np.ndarray, edge_index: np.ndarray) -> np.ndarray:
+        """
+        Adds an imaginary output node to the node features and edge index and converts the layout to iGraph
+        :param node_feat: The node features, used to find the output nodes
+        :param edge_index: The array containing the edge indices
+        :return: The new edges
+        """
+
+        # we add an imaginary node that connects all the output nodes
+        outputs = np.where(node_feat[:, 0] == 1)[0]
+        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
+        new_edges[:, 1] = outputs
+        new_edges[:, 0] = len(node_feat)
+        new_edges = np.concatenate([edge_index, new_edges], axis=0)
+
+        # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
+        new_edges = np.fliplr(new_edges).copy()
+
+        return new_edges
+
+    def get_graph_and_connection_matrix(self, n_nodes: int, edge_index: np.ndarray):
+        """
+        Returns the graph and the connection matrix for the given node features and edge index
+        :param n_nodes: The number of nodes in the graph
+        :param edge_index: The edge index
+        :return: The graph and the sparse connection matrix
+        """
+
+        # create the graph, name it after the file name such that it has a unique name
+        graph = Graph(n=n_nodes, edges=edge_index, directed=True)
+
+        # get the connection matrix (COO format) without the imaginary node
+        row_ids = []
+        col_ids = []
+        vals = []
+        for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=1)[:-1]):
+            distances = self.decay ** np.array(graph.distances(vertex_id, neighborhood, mode="in")[0])
+            # norm the distances
+            distances /= distances.sum()
+            for neighbor, distance in zip(neighborhood, distances):
+                row_ids.append(vertex_id)
+                col_ids.append(neighbor)
+                vals.append(distance)
+
+        # create the sparse connection matrix
+        connection_mat = torch.sparse_coo_tensor(np.stack([row_ids, col_ids]), vals, (n_nodes - 1, n_nodes - 1))
+
+        return graph, connection_mat
+
+    def read_data(self, data: dict[str : np.ndarray]):
+        """
+        Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
+        :param data: The data of the npz file (not necessary in memory)
+        :return: The data dict with the imaginary output node and the graph
+        """
+
+        # read out the data
+        filename = data.zip.filename
+        data = {k: v for k, v in data.items()}
+
+        # read out the data for this graph
+        node_feat = data["node_feat"]
+        data["edge_index"] = self.add_imaginary_output_node(node_feat, data["edge_index"])
+
+        # get graph and connection matrix
+        graph, connection_matrix = self.get_graph_and_connection_matrix(
+            n_nodes=len(node_feat) + 1, edge_index=data["edge_index"]
+        )
+        graph["name"] = filename
+        data["graph"] = graph
+        data["connection_matrix"] = connection_matrix
+
+        return data
+
     def __len__(self):
         """
         Returns the length of the dataset
@@ -134,14 +220,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         """
 
         return self.length
-
-    @staticmethod
-    @abstractmethod
-    def read_data(data: dict[str : np.ndarray]):
-        """
-        This has to be implemented by the child classes. Reads out the datadict from the npz file into memory and adds
-        """
-        pass
 
     @abstractmethod
     def __getitem__(self, idx):
@@ -174,40 +252,6 @@ class TileDataset(TPUGraphDataset):
     This class implements the dataset for the tiles. It loads all the files and provides an interface to them.
     """
 
-    @staticmethod
-    def read_data(data: dict[str : np.ndarray]):
-        """
-        Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
-        :param data: The data of the npz file (not necessary in memory)
-        :return: The data dict with the imaginary output node and the graph
-        """
-
-        # read out the data
-        filename = data.zip.filename
-        data = {k: v for k, v in data.items()}
-
-        # read out the data for this graph
-        node_feat = data["node_feat"]
-        edge_index = data["edge_index"]
-
-        # we add an imaginary node that connects all the output nodes
-        outputs = np.where(node_feat[:, 0] == 1)[0]
-        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
-        new_edges[:, 1] = outputs
-        new_edges[:, 0] = len(node_feat)
-        new_edges = np.concatenate([edge_index, new_edges], axis=0)
-
-        # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
-        new_edges = np.fliplr(new_edges).copy()
-        data["edge_index"] = new_edges
-
-        # create the graph, name it after the file name such that it has a unique name
-        graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
-        graph["name"] = filename
-        data["graph"] = graph
-
-        return data
-
     def __getitem__(self, idx):
         """
         Loads a file into memory and returns a sample
@@ -223,6 +267,7 @@ class TileDataset(TPUGraphDataset):
         node_opcode = data["node_opcode"]
         edge_index = data["edge_index"]
         graph = data["graph"]
+        connection_matrix = data["connection_matrix"]
 
         # read out the specific config
         config_feat = data["config_feat"][offset]
@@ -235,47 +280,13 @@ class TileDataset(TPUGraphDataset):
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
         features = np.concatenate([node_opcode[:, None], node_feat, config_feat], axis=1)
 
-        return features, config_runtime, edge_index, graph
+        return features, config_runtime, edge_index, connection_matrix, graph
 
 
 class LayoutDataset(TPUGraphDataset):
     """
     This class implements the dataset for the layout. It loads all the files and provides an interface to them.
     """
-
-    @staticmethod
-    def read_data(data: dict[str : np.ndarray]):
-        """
-        Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
-        :param data: The data of the npz file (not necessary in memory)
-        :return: The data dict with the imaginary output node and the graph
-        """
-
-        # read out the data
-        filename = data.zip.filename
-        data = {k: v for k, v in data.items()}
-
-        # read out the data for this graph
-        node_feat = data["node_feat"]
-        edge_index = data["edge_index"]
-
-        # we add an imaginary node that connects all the output nodes
-        outputs = np.where(node_feat[:, 0] == 1)[0]
-        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
-        new_edges[:, 1] = outputs
-        new_edges[:, 0] = len(node_feat)
-        new_edges = np.concatenate([edge_index, new_edges], axis=0)
-
-        # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
-        new_edges = np.fliplr(new_edges).copy()
-        data["edge_index"] = new_edges
-
-        # create the graph, name it after the file name such that it has a unique name
-        graph = Graph(n=len(node_feat) + 1, edges=new_edges, directed=True)
-        graph["name"] = filename
-        data["graph"] = graph
-
-        return data
 
     def __getitem__(self, idx):
         """
