@@ -110,11 +110,11 @@ def train_tile_network(**kwargs):
 
     logger.info("Loading the dataset for validation")
     val_dataset = dataset_class([base_path.joinpath("valid") for base_path in base_paths], cache=kwargs["cache"])
-    val_dataloader = val_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
+    val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False)
 
     logger.info("Loading the dataset for testing")
     test_dataset = dataset_class([base_path.joinpath("test") for base_path in base_paths], cache=kwargs["cache"])
-    test_dataloader = test_dataset.get_dataloader(batch_size=kwargs["batch_size"], shuffle=False)
+    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
