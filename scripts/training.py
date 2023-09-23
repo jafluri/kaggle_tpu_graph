@@ -201,7 +201,7 @@ def train_tile_network(**kwargs):
                 fast_eval=kwargs["fast_eval"],
             )
             # log everything
-            summaries = {"val_loss": avg_loss, "val_avg_kendall": avg_kendall}
+            wandb.log({"val_loss": avg_loss, "val_avg_kendall": avg_kendall}, commit=False)
             logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
 
             # test the network
@@ -213,8 +213,7 @@ def train_tile_network(**kwargs):
                 fast_eval=kwargs["fast_eval"],
             )
             # log everything
-            summaries.update({"test_loss": avg_loss, "test_avg_kendall": avg_kendall})
-            wandb.log(summaries, step=epoch)
+            wandb.log({"test_loss": avg_loss, "test_avg_kendall": avg_kendall})
             logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
         else:
             logger.info("Validating the network")
@@ -225,7 +224,7 @@ def train_tile_network(**kwargs):
                 fast_eval=kwargs["fast_eval"],
             )
             # log everything
-            summaries = {"val_loss": avg_loss, "val_avg_slowdown": avg_slowdown}
+            wandb.log({"val_loss": avg_loss, "val_avg_slowdown": avg_slowdown}, commit=False)
             logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
 
             # test the network
@@ -237,8 +236,7 @@ def train_tile_network(**kwargs):
                 fast_eval=kwargs["fast_eval"],
             )
             # log everything
-            summaries.update({"test_loss": avg_loss, "test_avg_slowdown": avg_slowdown})
-            wandb.log(summaries, step=epoch)
+            wandb.log({"test_loss": avg_loss, "test_avg_slowdown": avg_slowdown})
             logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
 
     # save the model
