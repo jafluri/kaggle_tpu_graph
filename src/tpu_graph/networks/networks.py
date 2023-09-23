@@ -94,13 +94,24 @@ class TPUGraphNetwork(nn.Module):
         # project the features
         pro_features = self.projection_network(emb_features)
 
-        # split again
-        pro_features = torch.split(pro_features, lengths, dim=0)
-        # accumulate the projection according to the connection matrices
-        pro_features = [torch.matmul(cm, f) for cm, f in zip(connection_matrices, pro_features)]
+        # create a large sparse matrix from all the connection matrices
+        indices = []
+        values = []
+        for i, cm in enumerate(connection_matrices):
+            offset = sum(lengths[:i])
+            indices.append(cm._indices() + offset)
+            values.append(cm._values())
+        connection_matrix = torch.sparse_coo_tensor(
+            indices=torch.cat(indices, dim=1),
+            values=torch.cat(values),
+            size=(sum(lengths), sum(lengths)),
+            device=features.device,
+        )
+
+        # matrix dense multiplication
+        features = torch.mm(connection_matrix, pro_features)
 
         # embed the graph to rutimes
-        features = torch.cat(pro_features, dim=0)
         features = torch.cat([features, emb_features], dim=1)
         runtimes = self.graph_embedding_network(features)
 
