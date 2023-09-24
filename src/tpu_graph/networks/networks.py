@@ -1,8 +1,7 @@
 import torch
-from torch import nn
-
-import numpy as np
+import torch_scatter
 from igraph import Graph
+from torch import nn
 
 
 class EmeddingInputLayer(nn.Module):
@@ -42,6 +41,57 @@ class EmeddingInputLayer(nn.Module):
         return torch.concatenate([embedding, x[:, 1:]], dim=1)
 
 
+class BatchedSemiAttention(nn.Module):
+    """
+    Implements the scaled dot product attention with batching over one large tensor using the scatter library
+    """
+
+    def __init__(self, inp_dim: int, emb_dim: int):
+        """
+        Init the layer
+        :param inp_dim: The input dimension
+        :param emb_dim: The embedding dimension
+        """
+
+        # init the super class
+        super().__init__()
+
+        # save attributes
+        self.inp_dim = inp_dim
+        self.emb_dim = emb_dim
+
+        # init the layers
+        self.k = nn.Linear(inp_dim, emb_dim)
+        self.v = nn.Linear(inp_dim, emb_dim)
+        self.outp = nn.Linear(emb_dim, 1)
+
+    def forward(self, x: torch.Tensor, input_lengths: list[int]):
+        """
+        Forward pass of the layer
+        :param x: The input where all batches are concatenated
+        :param input_lengths: The lengths of the individual batches
+        :return: The attention output
+        """
+
+        # create and index array for the scatter operation
+        index = torch.cat([torch.ones(l) * i for i, l in enumerate(input_lengths)]).long().to(x.device)
+
+        # get the keys and values
+        keys = self.k(x)
+        values = self.v(x)
+
+        # sum all the keys and softmax
+        softmax = torch_scatter.scatter_softmax(torch.sum(keys, dim=1, keepdim=True), index=index, dim=0)
+
+        # multiply with the values
+        output = torch_scatter.scatter_add(softmax * values, index=index, dim=0)
+
+        # project to output
+        output = self.outp(output)
+
+        return output
+
+
 class TPUGraphNetwork(nn.Module):
     """
     A simple network used for the tile predictions
@@ -52,6 +102,7 @@ class TPUGraphNetwork(nn.Module):
         embedding_layer: EmeddingInputLayer,
         projection_network: nn.Sequential,
         graph_embedding_network: nn.Sequential,
+        batch_semi_attention: BatchedSemiAttention,
         exp: bool = False,
         **kwargs,
     ):
@@ -60,6 +111,7 @@ class TPUGraphNetwork(nn.Module):
         :param embedding_layer: A layer that embeds the first column of the input for the op code
         :param projection_network: The network that projects the input to the correct size
         :param graph_embedding_network: Network that takes the projections and features and embeds them
+        :param batch_semi_attention: The attention for the final output
         :param exp: Exponentiate the output (makes stuff additive in the loss)
         :param kwargs: Additional arguments for the super class
         """
@@ -71,6 +123,7 @@ class TPUGraphNetwork(nn.Module):
         self.embedding_layer = embedding_layer
         self.projection_network = projection_network
         self.graph_embedding_network = graph_embedding_network
+        self.batch_semi_attention = batch_semi_attention
         self.exp = exp
 
         # dict for the paths
@@ -115,11 +168,14 @@ class TPUGraphNetwork(nn.Module):
         features = torch.cat([features, emb_features], dim=1)
         runtimes = self.graph_embedding_network(features)
 
+        # attention
+        runtimes = self.batch_semi_attention(runtimes, lengths)
+
         if self.exp:
             runtimes = torch.exp(runtimes)
-        runtimes = torch.split(runtimes, lengths, dim=0)
 
-        return runtimes
+        # split into results for individual graphs
+        return torch.split(runtimes.reshape([-1]), split_size_or_sections=1, dim=0)
 
     def accumulate_runtime(
         self,
@@ -144,40 +200,4 @@ class TPUGraphNetwork(nn.Module):
         # get the runtimes
         node_runtimes = self(features, connection_matrices)
 
-        # accumulate the runtimes
-        accumulated_runtimes = []
-        for runtimes, feat, edges, connection_matrix, graph in zip(
-            node_runtimes, features, edge_indices, connection_matrices, graphs
-        ):
-            if graph["name"] not in self.path_dict or np.random.uniform() < p_update_path:
-                # detach and copy everything to cpu
-                edges = edges.cpu().numpy()
-                runtime_numpy = runtimes.cpu().detach().numpy()
-
-                # get the output node (this is always an imaginary node added by the dataset loader)
-                output_node = len(runtime_numpy)
-                # The weight for an edge is the runtime of the source node
-                weights = -runtime_numpy[edges[:, 0]]
-
-                # get the shortest path
-                dists = graph.distances(source=output_node, mode="in", weights=weights)[0]
-                min_dist = np.argmin(dists)
-                shortest_path = graph.get_shortest_paths(v=output_node, to=min_dist, weights=weights, mode="in")[0]
-                # truncate the shortest path to avoid the output node
-                shortest_path = shortest_path[1:]
-
-                # now we create the accumulation vector
-                accumulate_vec = np.zeros_like(runtime_numpy)
-                accumulate_vec[shortest_path] = 1.0
-                accumulate_vec = torch.tensor(accumulate_vec, dtype=torch.float32).to(runtimes.device)
-
-                # save the path
-                self.path_dict[graph["name"]] = accumulate_vec
-
-            # get the accumulate vec
-            accumulate_vec = self.path_dict[graph["name"]]
-
-            # accumulate the runtimes
-            accumulated_runtimes.append((runtimes * accumulate_vec).sum())
-
-        return accumulated_runtimes
+        return node_runtimes

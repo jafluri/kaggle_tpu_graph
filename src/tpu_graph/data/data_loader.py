@@ -2,6 +2,7 @@ import os
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
+from scipy.sparse.linalg import eigsh
 import numba as nb
 import numpy as np
 import torch
@@ -22,6 +23,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         cache=False,
         cutoff: int = 3,
         decay: float = 0.5,
+        lpe_dim: int = 16,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -29,11 +31,13 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         :param cache: If True, the dataset is cached in memory
         :param cutoff: The cutoff for the shortest path connection matrix
         :param decay: The decay for the shortest path connection matrix
+        :param lpe_dim: The dimension of the laplacian positional encoding
         """
 
         # save the attributes
         self.cutoff = cutoff
         self.decay = decay
+        self.lpe_dim = lpe_dim
 
         # get all the files
         if not isinstance(data_path, list):
@@ -43,7 +47,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))
+            file_list = sorted(path.glob("*.npz"))[:2]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -188,6 +192,37 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         return graph, connection_mat
 
+    def calculate_lpe(self, graph: Graph):
+        """
+        Calculates the laplacian positional encoding for the given graph, taken from
+        pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/transforms/add_positional_encoding.html
+        :param graph: The graph to calculate the lpe for
+        :return: The lpe for the graph
+        """
+
+        # get the laplacian matrix
+        graph = graph.as_undirected()
+        laplacian = np.array(graph.laplacian(mode="in", normalized=True))
+
+        # get the eigenvectors
+        eig_vals, eig_vecs = eigsh(
+            laplacian,
+            k=self.lpe_dim + 1 if self.lpe_dim < laplacian.shape[0] else laplacian.shape[0] - 1,
+            which="SA",
+            return_eigenvectors=True,
+        )
+
+        # sort the eigenvectors
+        eig_vecs = np.real(eig_vecs[:, eig_vals.argsort()])
+
+        # pad if necessary
+        if self.lpe_dim < laplacian.shape[0]:
+            eig_vecs = eig_vecs[:, 1:]
+        else:
+            eig_vecs = np.pad(eig_vecs, ((0, 0), (0, self.lpe_dim - laplacian.shape[0] + 1)))
+
+        return eig_vecs
+
     def read_data(self, data: dict[str : np.ndarray]):
         """
         Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
@@ -210,6 +245,9 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         graph["name"] = filename
         data["graph"] = graph
         data["connection_matrix"] = connection_matrix
+
+        # calculate the lpe
+        data["lpe"] = self.calculate_lpe(graph)
 
         return data
 
@@ -267,6 +305,7 @@ class TileDataset(TPUGraphDataset):
         node_opcode = data["node_opcode"]
         edge_index = data["edge_index"]
         graph = data["graph"]
+        lpe = data["lpe"]
         connection_matrix = data["connection_matrix"]
 
         # read out the specific config
@@ -278,7 +317,7 @@ class TileDataset(TPUGraphDataset):
 
         # tile config_features such that axis 0 matches with the number of nodes
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
-        features = np.concatenate([node_opcode[:, None], node_feat, config_feat], axis=1)
+        features = np.concatenate([node_opcode[:, None], node_feat, lpe[:-1], config_feat], axis=1)
 
         return features, config_runtime, edge_index, connection_matrix, graph
 

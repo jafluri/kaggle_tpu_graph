@@ -6,7 +6,7 @@ import click
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer
+from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer, BatchedSemiAttention
 from tpu_graph.training import losses, evaluation
 from tqdm import tqdm
 
@@ -119,6 +119,8 @@ def train_tile_network(**kwargs):
     # we build a super simple network for starters
     logger.info("Building the network")
     input_dim = 159 if kwargs["layout_network"] else 165
+    # add the lpe dimension
+    input_dim += 16
     # deal with the embedding
     input_dim += 31
     embedding_layer = EmeddingInputLayer()
@@ -130,17 +132,20 @@ def train_tile_network(**kwargs):
         nn.SiLU(),
         nn.Linear(256, 128),
         nn.LayerNorm(128),
+        nn.Linear(128, 128),
+        nn.SiLU(),
+        nn.LayerNorm(128),
         nn.Linear(128, 64),
         nn.SiLU(),
         nn.LayerNorm(64),
-        nn.Linear(64, 1),
-        nn.ReLU(),
     )
+    batched_semi_attention = BatchedSemiAttention(64, 64)
 
     network = TPUGraphNetwork(
         embedding_layer=embedding_layer,
         projection_network=projection_network,
         graph_embedding_network=graph_embedding_network,
+        batch_semi_attention=batched_semi_attention,
         exp=kwargs["exp_pred"],
     )
 
