@@ -157,7 +157,7 @@ class TPUGraphNetwork(nn.Module):
         if self.exp:
             runtimes = torch.exp(runtimes)
 
-        return runtimes
+        return runtimes.reshape(-1)
 
     def accumulate_runtime(
         self,
