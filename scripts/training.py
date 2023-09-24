@@ -175,10 +175,8 @@ def train_tile_network(**kwargs):
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
-        for batch_idx, (features, runtimes, edges, connection_matrices, graphs) in enumerate(pbar):
-            pred_runtimes = network.accumulate_runtime(
-                features, edges, connection_matrices, graphs, kwargs["p_update_path"]
-            )
+        for batch_idx, (features, lengths, runtimes, connection_matrix) in enumerate(pbar):
+            pred_runtimes = network(features, connection_matrix, lengths)
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=not kwargs["mse"])
             summaries = {"loss": loss.item()}
 
@@ -232,7 +230,6 @@ def train_tile_network(**kwargs):
                 network,
                 val_dataloader,
                 save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
-                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"val_loss": avg_loss, "val_avg_slowdown": avg_slowdown}, commit=False)
@@ -244,7 +241,6 @@ def train_tile_network(**kwargs):
                 network,
                 test_dataloader,
                 save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
-                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"test_loss": avg_loss, "test_avg_slowdown": avg_slowdown})

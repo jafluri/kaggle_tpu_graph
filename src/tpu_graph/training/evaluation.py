@@ -10,12 +10,11 @@ from . import losses
 from ..networks.networks import TPUGraphNetwork
 
 
-def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, p_update_path: float = 1.0):
+def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader):
     """
     Evaluates the network and returns the average loss, prediction and labels
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
-    :param p_update_path: The probability to update the longest path for a given graph. Defaults to 1.0 (always).
     :return: The average loss, predictions and labels
     """
 
@@ -25,13 +24,11 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, p_update_
     labels = []
     loss_vals = []
     with torch.no_grad():
-        for batch_idx, (features, runtimes, edges, connection_matrices, graphs) in enumerate(pbar):
+        for batch_idx, (features, lengths, runtimes, connection_matrix) in enumerate(pbar):
             # eval the network
-            pred_runtimes = network.accumulate_runtime(
-                features, edges, connection_matrices, graphs, p_update_path=p_update_path
-            )
-            predictions.append(np.array([p.cpu().detach().numpy() for p in pred_runtimes]))
-            labels.append(np.array([r.cpu().detach().numpy() for r in runtimes]))
+            pred_runtimes = network(features, connection_matrix, lengths)
+            predictions.append(pred_runtimes.cpu().detach().numpy())
+            labels.append(runtimes.cpu().detach().numpy())
 
             # calculate the loss and log it
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=True)
@@ -53,14 +50,12 @@ def evaluate_tile_network(
     network: TPUGraphNetwork,
     dataloader: DataLoader,
     save_path: str | bytes | os.PathLike = None,
-    fast_eval: bool = False,
 ):
     """
     Evaluates the tile network on the given dataloader
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
     :param save_path: If not None, the path where to save the predictions etc. (NPZ file)
-    :param fast_eval: If True, we calculate the longest path only once and use it for all iterations of the same graph
     :return: The average loss (log mse) and the average slowdown
     """
 
@@ -68,8 +63,7 @@ def evaluate_tile_network(
     dataset = dataloader.dataset
 
     # evaluate the network
-    p_update_path = 0.0 if fast_eval else 1.0
-    avg_loss, predictions, labels = evaluate_network(network, dataloader, p_update_path=p_update_path)
+    avg_loss, predictions, labels = evaluate_network(network, dataloader)
 
     # split the predictions and labels according to the files
     split_predictions = np.split(predictions, dataset.offsets[:-1])

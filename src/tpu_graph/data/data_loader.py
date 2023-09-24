@@ -47,7 +47,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))
+            file_list = sorted(path.glob("*.npz"))[:2]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -81,9 +81,12 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # list for the collection
         features = []
         times = []
-        edge_indices = []
-        connection_matrices = []
-        graphs = []
+        # for the connection matrices
+        indices = []
+        values = []
+        offset = 0
+        # the individual length of the graphs
+        lengths = []
 
         # unpack everything
         for t in tensors:
@@ -92,13 +95,22 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
             # append the tensors that need to go through the network
             features.append(torch.tensor(node_feat, dtype=dtype).to(device))
-            times.append(torch.tensor(config_runtime, dtype=dtype).to(device))
-            connection_matrices.append(connection_matrix.type(dtype).to(device))
-            # the edge index needs to be int32
-            edge_indices.append(torch.tensor(edge_index, dtype=torch.int32))
-            graphs.append(graph)
+            lengths.append(node_feat.shape[0])
+            times.append(config_runtime)
+            indices.append(connection_matrix._indices() + offset)
+            offset += node_feat.shape[0]
+            values.append(connection_matrix._values())
 
-        return features, times, edge_indices, connection_matrices, graphs
+        # stack the tensors
+        features = torch.cat(features, dim=0)
+        times = torch.tensor(times, dtype=dtype).to(device)
+        indices = torch.cat(indices, dim=1)
+        values = torch.cat(values, dim=0)
+        connection_matrix = (
+            torch.sparse_coo_tensor(indices, values, (features.shape[0], features.shape[0])).float().to(device)
+        )
+
+        return features, lengths, times, connection_matrix
 
     def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False):
         """

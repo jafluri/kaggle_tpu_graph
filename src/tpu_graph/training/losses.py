@@ -2,23 +2,19 @@ import numpy as np
 import torch
 
 
-def square_loss(pred, label, log=False):
+def square_loss(pred: torch.Tensor, label: torch.Tensor, log=False):
     """
     Calculates the square loss between pred and label
-    :param pred: A list of predicted values
-    :param label: A list of labels
+    :param pred: The predictions
+    :param label: The labels
     :param log: If True, values are taken as log values
     :return: The loss
     """
 
-    loss = 0
-    for p, l in zip(pred, label):
-        if log:
-            loss += torch.mean((torch.log(p + 1) - torch.log(l + 1)) ** 2)
-        else:
-            loss += torch.mean((p - l) ** 2)
-
-    return loss / len(pred)
+    if log:
+        return torch.mean((torch.log(pred + 1) - torch.log(label + 1)) ** 2)
+    else:
+        return torch.mean((pred - label) ** 2)
 
 
 def slowdown(pred: list[np.ndarray], label: list[np.ndarray], k: int = 5):

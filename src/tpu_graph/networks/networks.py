@@ -129,37 +129,20 @@ class TPUGraphNetwork(nn.Module):
         # dict for the paths
         self.path_dict = dict()
 
-    def forward(self, features: list[torch.Tensor], connection_matrices: list[torch.Tensor]):
+    def forward(self, features: torch.Tensor, connection_matrix: torch.Tensor, lengths: list[int]):
         """
         Forward pass of the network
-        :param features: A list of tensors with shape (n_nodes, n_features)
-
+        :param features: The input features (multiple graphs concatenated)
+        :param connection_matrix: The connection matrix for the graphs
+        :param lengths: The lengths of the individual graphs
         :return: The predicted runtime in nanoseconds
         """
-
-        # we concat everything and split again for efficiency
-        lengths = [f.shape[0] for f in features]
-        features = torch.cat(features, dim=0)
 
         # embed the first column
         emb_features = self.embedding_layer(features)
 
         # project the features
         pro_features = self.projection_network(emb_features)
-
-        # create a large sparse matrix from all the connection matrices
-        indices = []
-        values = []
-        for i, cm in enumerate(connection_matrices):
-            offset = sum(lengths[:i])
-            indices.append(cm._indices() + offset)
-            values.append(cm._values())
-        connection_matrix = torch.sparse_coo_tensor(
-            indices=torch.cat(indices, dim=1),
-            values=torch.cat(values),
-            size=(sum(lengths), sum(lengths)),
-            device=features.device,
-        )
 
         # matrix dense multiplication
         features = torch.mm(connection_matrix, pro_features)
@@ -174,8 +157,7 @@ class TPUGraphNetwork(nn.Module):
         if self.exp:
             runtimes = torch.exp(runtimes)
 
-        # split into results for individual graphs
-        return torch.split(runtimes.reshape([-1]), split_size_or_sections=1, dim=0)
+        return runtimes
 
     def accumulate_runtime(
         self,
