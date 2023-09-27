@@ -26,7 +26,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         cache=False,
         cutoff: int = 3,
         lpe_dim: int = 16,
-        clear_cache: bool = True,
+        clear_cache: bool = False,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
