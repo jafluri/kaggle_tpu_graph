@@ -372,8 +372,7 @@ class LayoutDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        lpe = data["lpe"]
-        connection_matrix = (data["row_indices"], data["col_indices"])
+        connection_matrix = (data["row_indices"], data["col_indices"], data["distances"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -387,9 +386,8 @@ class LayoutDataset(TPUGraphDataset):
         config_runtime = data["config_runtime"][indices]
 
         # tile config_features such that axis 0 matches with the number of nodes
-        lpe = np.tile(lpe[:-1], (self.list_size, 1, 1))
         node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
         node_feat = np.tile(node_feat, (self.list_size, 1, 1))
-        features = np.concatenate([node_opcode, node_feat, lpe, config_feat], axis=2)
+        features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
 
         return features, connection_matrix, config_runtime
