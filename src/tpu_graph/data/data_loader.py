@@ -20,6 +20,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
     def __init__(
         self,
         data_path: str | bytes | os.PathLike | list[str | bytes | os.PathLike],
+        list_size: int = 16,
+        list_shuffle: bool = False,
         cache=False,
         cutoff: int = 3,
         decay: float = 0.5,
@@ -28,6 +30,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         """
         Inits the dataset with a directory containing the NPZ files
         :param data_path: The directory containing the NPZ files that will be loaded, can also be a list of directories
+        :param list_size: The number of samples that are returned per graph
+        :param list_shuffle: If True, the samples are shuffled before returning them
         :param cache: If True, the dataset is cached in memory
         :param cutoff: The cutoff for the shortest path connection matrix
         :param decay: The decay for the shortest path connection matrix
@@ -36,6 +40,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # save the attributes
         self.cutoff = cutoff
+        self.list_size = list_size
+        self.list_shuffle = list_shuffle
         self.decay = decay
         self.lpe_dim = lpe_dim
 
@@ -47,7 +53,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))
+            file_list = sorted(path.glob("*.npz"))[:5]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -58,7 +64,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.data_dict = {}
         for f in tqdm(self.file_list):
             with np.load(f) as data:
-                self.size_list.append(len(data["config_runtime"]))
+                self.size_list.append(len(data["config_runtime"]) // self.list_size)
                 # read out all the data if we want to cache
                 if self.cache:
                     # read out the data
@@ -90,24 +96,26 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # unpack everything
         for t in tensors:
-            assert len(t) == 5, "The length of the tensors must be 5"
-            node_feat, config_runtime, edge_index, connection_matrix, graph = t
+            assert len(t) == 3, "The length of the tensors must be 3"
+            node_feat, connection_matrix, config_runtime = t
 
             # append the tensors that need to go through the network
-            features.append(torch.tensor(node_feat, dtype=dtype).to(device))
-            lengths.append(node_feat.shape[0])
+            features.append(node_feat)
+            lengths.append(node_feat.shape[1])
             times.append(config_runtime)
             indices.append(connection_matrix._indices() + offset)
-            offset += node_feat.shape[0]
+            offset += node_feat.shape[1]
             values.append(connection_matrix._values())
 
         # stack the tensors
-        features = torch.cat(features, dim=0)
-        times = torch.tensor(times, dtype=dtype).to(device)
+        features = torch.Tensor(np.concatenate(features, axis=1)).to(device)
+        times = torch.tensor(np.stack(times, axis=0), dtype=dtype).to(device)
         indices = torch.cat(indices, dim=1)
         values = torch.cat(values, dim=0)
         connection_matrix = (
-            torch.sparse_coo_tensor(indices, values, (features.shape[0], features.shape[0])).float().to(device)
+            torch.sparse_coo_tensor(indices, values, (features.shape[1], features.shape[1], values.shape[1]))
+            .float()
+            .to(device)
         )
 
         return features, lengths, times, connection_matrix
@@ -175,12 +183,12 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         return new_edges
 
-    def get_graph_and_connection_matrix(self, n_nodes: int, edge_index: np.ndarray):
+    def get_graph_and_context_matrix(self, n_nodes: int, edge_index: np.ndarray):
         """
         Returns the graph and the connection matrix for the given node features and edge index
         :param n_nodes: The number of nodes in the graph
         :param edge_index: The edge index
-        :return: The graph and the sparse connection matrix
+        :return: The graph and the sparse context matrix (mixed)
         """
 
         # create the graph, name it after the file name such that it has a unique name
@@ -190,17 +198,21 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         row_ids = []
         col_ids = []
         vals = []
-        for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=1)[:-1]):
-            distances = self.decay ** np.array(graph.distances(vertex_id, neighborhood, mode="in")[0])
-            # norm the distances
-            distances /= distances.sum()
-            for neighbor, distance in zip(neighborhood, distances):
+        for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=0)[:-1]):
+            if len(neighborhood) == 1:
+                lpe_subgraph = np.ones((1, self.lpe_dim))
+            else:
+                subgraph = graph.subgraph(neighborhood)
+                lpe_subgraph = self.calculate_lpe(subgraph)
+            for neighbor, lpe in zip(neighborhood, lpe_subgraph):
                 row_ids.append(vertex_id)
                 col_ids.append(neighbor)
-                vals.append(distance)
+                vals.append(lpe)
 
         # create the sparse connection matrix
-        connection_mat = torch.sparse_coo_tensor(np.stack([row_ids, col_ids]), vals, (n_nodes - 1, n_nodes - 1))
+        connection_mat = torch.sparse_coo_tensor(
+            np.stack([row_ids, col_ids]), vals, (n_nodes - 1, n_nodes - 1, self.lpe_dim)
+        )
 
         return graph, connection_mat
 
@@ -251,7 +263,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         data["edge_index"] = self.add_imaginary_output_node(node_feat, data["edge_index"])
 
         # get graph and connection matrix
-        graph, connection_matrix = self.get_graph_and_connection_matrix(
+        graph, connection_matrix = self.get_graph_and_context_matrix(
             n_nodes=len(node_feat) + 1, edge_index=data["edge_index"]
         )
         graph["name"] = filename
@@ -260,6 +272,11 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # calculate the lpe
         data["lpe"] = self.calculate_lpe(graph)
+
+        # the indices of the samples
+        data["indices"] = np.arange(len(data["config_runtime"]))
+        if self.list_shuffle:
+            np.random.shuffle(data["indices"])
 
         return data
 
@@ -315,23 +332,24 @@ class TileDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        edge_index = data["edge_index"]
-        graph = data["graph"]
         lpe = data["lpe"]
         connection_matrix = data["connection_matrix"]
 
         # read out the specific config
-        config_feat = data["config_feat"][offset]
+        indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
+        config_feat = data["config_feat"][indices]
 
         # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
-        config_runtime = data["config_runtime"][offset] / data["config_runtime_normalizers"][offset]
-        config_runtime *= data["config_runtime"][0]
+        config_runtime = data["config_runtime"][indices] / data["config_runtime_normalizers"][indices]
 
         # tile config_features such that axis 0 matches with the number of nodes
-        config_feat = np.tile(config_feat, (node_feat.shape[0], 1))
-        features = np.concatenate([node_opcode[:, None], node_feat, lpe[:-1], config_feat], axis=1)
+        config_feat = np.tile(config_feat, (node_feat.shape[0], 1, 1)).transpose((1, 0, 2))
+        node_feat = np.tile(node_feat, (self.list_size, 1, 1))
+        lpe = np.tile(lpe[:-1], (self.list_size, 1, 1))
+        node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
+        features = np.concatenate([node_opcode, node_feat[:], lpe, config_feat], axis=2)
 
-        return features, config_runtime, edge_index, connection_matrix, graph
+        return features, connection_matrix, config_runtime
 
 
 class LayoutDataset(TPUGraphDataset):

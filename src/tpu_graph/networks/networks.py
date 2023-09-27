@@ -1,6 +1,6 @@
+import numpy as np
 import torch
 import torch_scatter
-from igraph import Graph
 from torch import nn
 
 
@@ -33,12 +33,12 @@ class EmeddingInputLayer(nn.Module):
         """
 
         # get the first column and convert to int
-        op_code = x[:, 0].long()
+        op_code = x[..., 0].long()
 
         # embed the first column
         embedding = self.emb(op_code)
 
-        return torch.concatenate([embedding, x[:, 1:]], dim=1)
+        return torch.concatenate([embedding, x[..., 1:]], dim=-1)
 
 
 class BatchedSemiAttention(nn.Module):
@@ -46,11 +46,12 @@ class BatchedSemiAttention(nn.Module):
     Implements the scaled dot product attention with batching over one large tensor using the scatter library
     """
 
-    def __init__(self, inp_dim: int, emb_dim: int):
+    def __init__(self, inp_dim: int, val_dim: int, key_dim: int):
         """
         Init the layer
         :param inp_dim: The input dimension
-        :param emb_dim: The embedding dimension
+        :param val_dim: The embedding dimension
+        :param key_dim: The key dimension
         """
 
         # init the super class
@@ -58,38 +59,51 @@ class BatchedSemiAttention(nn.Module):
 
         # save attributes
         self.inp_dim = inp_dim
-        self.emb_dim = emb_dim
+        self.val_dim = val_dim
+        self.key_dim = key_dim
 
         # init the layers
-        self.k = nn.Linear(inp_dim, emb_dim)
-        self.v = nn.Linear(inp_dim, emb_dim)
-        self.outp = nn.Linear(emb_dim, 1)
+        self.k = nn.Linear(inp_dim, key_dim)
+        self.v = nn.Linear(inp_dim, val_dim)
+        self.out = nn.Linear(val_dim, val_dim)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(val_dim)
 
-    def forward(self, x: torch.Tensor, input_lengths: list[int]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
         """
         Forward pass of the layer
-        :param x: The input where all batches are concatenated
-        :param input_lengths: The lengths of the individual batches
+        :param x: The input where all batches are concatenated along dim 1
+        :param connection_matrix: The connection matrix for the graphs
         :return: The attention output
         """
 
-        # create and index array for the scatter operation
-        index = torch.cat([torch.ones(l) * i for i, l in enumerate(input_lengths)]).long().to(x.device)
+        x, connection_matrix = inp_tensors
 
         # get the keys and values
         keys = self.k(x)
         values = self.v(x)
 
-        # sum all the keys and softmax
-        softmax = torch_scatter.scatter_softmax(torch.sum(keys, dim=1, keepdim=True), index=index, dim=0)
+        # now we do k*q (graph, graph, lep, 1) * (1, graph, key, list)
+        weights = connection_matrix[..., None] * torch.permute(keys[None, ...], [0, 2, 3, 1])
+        # sum over the lep dimension
+        weights = torch.sum(weights, dim=2)
+        # softmax over the graph dimension
+        weights = torch.sparse.softmax(weights, dim=1)
 
-        # multiply with the values
-        output = torch_scatter.scatter_add(softmax * values, index=index, dim=0)
+        # now we do v * weights (graph, graph, list, 1) * (1, graph, list, n_features)
+        output = weights[..., None] * torch.permute(values[None, ...], [0, 2, 1, 3])
+        # sum over the softmax dimension (graph, list, n_features)
+        output = torch.sum(output, dim=1).to_dense()
 
-        # project to output
-        output = self.outp(output)
+        # final output
+        output = self.out(torch.permute(output, [1, 0, 2]))
 
-        return output
+        # activation and layer norm
+        output = self.silu(output)
+        output = self.layernorm(output)
+
+        # we output the connection matrix for the next layer
+        return output, connection_matrix
 
 
 class TPUGraphNetwork(nn.Module):
@@ -100,18 +114,16 @@ class TPUGraphNetwork(nn.Module):
     def __init__(
         self,
         embedding_layer: EmeddingInputLayer,
-        projection_network: nn.Sequential,
-        graph_embedding_network: nn.Sequential,
-        batch_semi_attention: BatchedSemiAttention,
+        local_transformer_network: nn.Sequential,
+        projection_network: nn.Module,
         exp: bool = False,
         **kwargs,
     ):
         """
         Init the network
         :param embedding_layer: A layer that embeds the first column of the input for the op code
-        :param projection_network: The network that projects the input to the correct size
-        :param graph_embedding_network: Network that takes the projections and features and embeds them
-        :param batch_semi_attention: The attention for the final output
+        :param local_transformer_network: A list of batched semi attention layers
+        :param projection_network: A network that projects the output of the transformer network to the output dimension
         :param exp: Exponentiate the output (makes stuff additive in the loss)
         :param kwargs: Additional arguments for the super class
         """
@@ -121,13 +133,9 @@ class TPUGraphNetwork(nn.Module):
 
         # save attributes
         self.embedding_layer = embedding_layer
+        self.local_transformer_network = local_transformer_network
         self.projection_network = projection_network
-        self.graph_embedding_network = graph_embedding_network
-        self.batch_semi_attention = batch_semi_attention
         self.exp = exp
-
-        # dict for the paths
-        self.path_dict = dict()
 
     def forward(self, features: torch.Tensor, connection_matrix: torch.Tensor, lengths: list[int]):
         """
@@ -138,48 +146,21 @@ class TPUGraphNetwork(nn.Module):
         :return: The predicted runtime in nanoseconds
         """
 
+        # create and index for the scatter sum
+        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to("cuda")
+
         # embed the first column
         emb_features = self.embedding_layer(features)
 
-        # project the features
-        pro_features = self.projection_network(emb_features)
+        # apply the transformer networks
+        graph_embedding, _ = self.local_transformer_network((emb_features, connection_matrix))
+        runtimes = self.projection_network(graph_embedding)
 
-        # matrix dense multiplication
-        features = torch.mm(connection_matrix, pro_features)
-
-        # embed the graph to rutimes
-        features = torch.cat([features, emb_features], dim=1)
-        runtimes = self.graph_embedding_network(features)
-
-        # attention
-        runtimes = self.batch_semi_attention(runtimes, lengths)
-
+        # exp the output if necessary
         if self.exp:
             runtimes = torch.exp(runtimes)
 
-        return runtimes.reshape(-1)
+        # sum over the graphs
+        runtimes = torch_scatter.scatter_sum(runtimes, index=index, dim=1)
 
-    def accumulate_runtime(
-        self,
-        features: list[torch.Tensor],
-        edge_indices: list[torch.Tensor],
-        connection_matrices: list[torch.Tensor],
-        graphs: list[Graph],
-        p_update_path: float = 1.0,
-    ):
-        """
-        Calls the network on the features and accumulates the runtime over the graph defined by the edge_indices
-        :param features: A list of tensors with shape (n_nodes, n_features)
-        :param edge_indices: A list of tensors with shape (n_edges, 2)
-        :param connection_matrices: A list of tensors with shape (n_nodes, n_nodes)
-        :param graphs: A list of graphs
-        :param p_update_path: The probability to update the longest path for a given graph. Defaults to 1.0 (always).
-                              Reducing this value can speed up the runtime but also reduces the accuracy as
-                              the longest path might not be correct for each run.
-        :return: A tensor with length of the input features containing the accumulated runtime
-        """
-
-        # get the runtimes
-        node_runtimes = self(features, connection_matrices)
-
-        return node_runtimes
+        return torch.squeeze(runtimes.transpose(0, 1))
