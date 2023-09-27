@@ -26,7 +26,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         cache=False,
         cutoff: int = 3,
         lpe_dim: int = 16,
-        clear_cache: bool = False,
+        clear_cache: bool = True,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -91,7 +91,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # for the connection matrices
         row_indices = []
         col_indices = []
-        values = []
         offset = 0
         # the individual length of the graphs
         lengths = []
@@ -100,7 +99,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         for t in tensors:
             assert len(t) == 3, "The length of the tensors must be 3"
             node_feat, connection_matrix, config_runtime = t
-            row_ids, col_ids, vals = connection_matrix
+            row_ids, col_ids = connection_matrix
 
             # append the tensors that need to go through the network
             features.append(node_feat)
@@ -108,7 +107,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             times.append(config_runtime)
             row_indices.append(row_ids + offset)
             col_indices.append(col_ids + offset)
-            values.append(vals)
             offset += node_feat.shape[1]
 
         # stack the tensors
@@ -118,8 +116,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # the connection matrix
         row_indices = torch.tensor(np.concatenate(row_indices, axis=0), dtype=torch.long).to(device)
         col_indices = torch.tensor(np.concatenate(col_indices, axis=0), dtype=torch.long).to(device)
-        values = torch.tensor(np.concatenate(values, axis=0), dtype=dtype).to(device)
-        connection_matrix = (row_indices, col_indices, values)
+        connection_matrix = (row_indices, col_indices)
 
         return features, lengths, times, connection_matrix
 
@@ -202,20 +199,13 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get the connection matrix (COO format) without the imaginary node
         row_ids = []
         col_ids = []
-        vals = []
         for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=0)[:-1]):
-            if len(neighborhood) == 1:
-                lpe_subgraph = np.ones((1, self.lpe_dim))
-            else:
-                subgraph = graph.subgraph(neighborhood)
-                lpe_subgraph = self.calculate_lpe(subgraph)
-            for neighbor, lpe in zip(neighborhood, lpe_subgraph):
+            for neighbor in neighborhood:
                 row_ids.append(vertex_id)
                 col_ids.append(neighbor)
-                vals.append(lpe)
 
         # create the sparse connection matrix
-        connection_mat = (np.array(row_ids, dtype=np.int32), np.array(col_ids, dtype=np.int32), np.stack(vals, axis=0))
+        connection_mat = (np.array(row_ids, dtype=np.int32), np.array(col_ids, dtype=np.int32))
 
         return graph, connection_mat
 
@@ -292,7 +282,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         graph["name"] = filename
 
         # unpack the connection matrix and save in the data dict
-        data["row_indices"], data["col_indices"], data["values"] = connection_matrix
+        data["row_indices"], data["col_indices"] = connection_matrix
 
         # calculate the lpe
         data["lpe"] = self.calculate_lpe(graph)
@@ -373,7 +363,7 @@ class TileDataset(TPUGraphDataset):
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
         lpe = data["lpe"]
-        connection_matrix = (data["row_indices"], data["col_indices"], data["values"])
+        connection_matrix = (data["row_indices"], data["col_indices"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -411,7 +401,7 @@ class LayoutDataset(TPUGraphDataset):
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
         lpe = data["lpe"]
-        connection_matrix = (data["row_indices"], data["col_indices"], data["values"])
+        connection_matrix = (data["row_indices"], data["col_indices"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]

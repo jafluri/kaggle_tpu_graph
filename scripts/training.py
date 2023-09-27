@@ -122,7 +122,7 @@ def train_tile_network(**kwargs):
 
     embedding_layer = EmeddingInputLayer()
     local_transformer_network = nn.Sequential(
-        BatchedSemiAttention(input_dim, 128, 16), BatchedSemiAttention(128, 128, 16), BatchedSemiAttention(128, 128, 16)
+        BatchedSemiAttention(input_dim, 128, 64), BatchedSemiAttention(128, 128, 64), BatchedSemiAttention(128, 128, 64)
     )
     projection_network = nn.Linear(128, 1)
 

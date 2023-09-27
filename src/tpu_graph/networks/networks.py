@@ -70,7 +70,7 @@ class BatchedSemiAttention(nn.Module):
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(val_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -79,7 +79,7 @@ class BatchedSemiAttention(nn.Module):
 
         # unpack the input tensors
         x, connection_matrix = inp_tensors
-        row_indices, col_indices, _ = connection_matrix
+        row_indices, col_indices = connection_matrix
 
         # get the keys and values
         keys = self.k(x)
@@ -157,7 +157,7 @@ class TPUGraphNetwork(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        connection_matrix: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        connection_matrix: tuple[torch.Tensor, torch.Tensor],
         lengths: list[int],
     ):
         """
