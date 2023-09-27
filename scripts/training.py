@@ -7,7 +7,8 @@ import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer, BatchedSemiAttention
-from tpu_graph.training import losses, evaluation
+from tpu_graph.training import evaluation
+from tpu_graph.training.ltr import PairwiseHingeLoss
 from tqdm import tqdm
 
 import wandb
@@ -109,12 +110,16 @@ def train_tile_network(**kwargs):
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     logger.info("Loading the dataset for validation")
-    val_dataset = dataset_class([base_path.joinpath("valid") for base_path in base_paths], cache=kwargs["cache"])
-    val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False)
+    val_dataset = dataset_class(
+        [base_path.joinpath("valid") for base_path in base_paths], cache=kwargs["cache"], list_size=1
+    )
+    val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     logger.info("Loading the dataset for testing")
-    test_dataset = dataset_class([base_path.joinpath("test") for base_path in base_paths], cache=kwargs["cache"])
-    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False)
+    test_dataset = dataset_class(
+        [base_path.joinpath("test") for base_path in base_paths], cache=kwargs["cache"], list_size=1
+    )
+    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
@@ -123,29 +128,17 @@ def train_tile_network(**kwargs):
     input_dim += 16
     # deal with the embedding
     input_dim += 31
+
     embedding_layer = EmeddingInputLayer()
-    projection_network = nn.Sequential(
-        nn.Linear(input_dim, 256), nn.SiLU(), nn.Linear(256, 128), nn.LayerNorm(128), nn.Linear(128, 64), nn.SiLU()
+    local_transformer_network = nn.Sequential(
+        BatchedSemiAttention(input_dim, 128, 16), BatchedSemiAttention(128, 128, 16), BatchedSemiAttention(128, 128, 16)
     )
-    graph_embedding_network = nn.Sequential(
-        nn.Linear(input_dim + 64, 256),
-        nn.SiLU(),
-        nn.Linear(256, 128),
-        nn.LayerNorm(128),
-        nn.Linear(128, 128),
-        nn.SiLU(),
-        nn.LayerNorm(128),
-        nn.Linear(128, 64),
-        nn.SiLU(),
-        nn.LayerNorm(64),
-    )
-    batched_semi_attention = BatchedSemiAttention(64, 64)
+    projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
         embedding_layer=embedding_layer,
+        local_transformer_network=local_transformer_network,
         projection_network=projection_network,
-        graph_embedding_network=graph_embedding_network,
-        batch_semi_attention=batched_semi_attention,
         exp=kwargs["exp_pred"],
     )
 
@@ -170,6 +163,12 @@ def train_tile_network(**kwargs):
     save_path = Path(kwargs["save_path"])
     save_path.mkdir(parents=True, exist_ok=True)
 
+    # create the loss fn
+    loss_class = PairwiseHingeLoss()
+
+    def loss_fn(pred, label):
+        loss_class(pred, label, torch.ones(train_dataset.list_size).long().to("cuda") * train_dataset.list_size)
+
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
@@ -177,7 +176,7 @@ def train_tile_network(**kwargs):
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
         for batch_idx, (features, lengths, runtimes, connection_matrix) in enumerate(pbar):
             pred_runtimes = network(features, connection_matrix, lengths)
-            loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=not kwargs["mse"])
+            loss = torch.mean(loss_fn(pred_runtimes, runtimes))
             summaries = {"loss": loss.item()}
 
             # log the loss to the logger

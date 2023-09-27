@@ -69,34 +69,45 @@ class BatchedSemiAttention(nn.Module):
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(val_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
         """
         Forward pass of the layer
-        :param x: The input where all batches are concatenated along dim 1
-        :param connection_matrix: The connection matrix for the graphs
+        :param inp_tensors: The input tensors (features, connection_matrix)
         :return: The attention output
         """
 
+        # unpack the input tensors
         x, connection_matrix = inp_tensors
+        row_indices, col_indices, queries = connection_matrix
 
         # get the keys and values
         keys = self.k(x)
         values = self.v(x)
 
-        # now we do k*q (graph, graph, lep, 1) * (1, graph, key, list)
-        weights = connection_matrix[..., None] * torch.permute(keys[None, ...], [0, 2, 3, 1])
+        # we need to reshape the keys for the embedding lookup (list, graph, features) -> (graph, -1)
+        list_dim, graph_dim, key_dim = keys.shape
+        keys = keys.transpose(0, 1).reshape(graph_dim, -1)
+        keys = nn.functional.embedding(col_indices, keys).reshape(col_indices.shape[0], list_dim, key_dim)
+
+        # we multiply the keys with the queries (graph, list, features) * (graph, list, features)
+        weights = keys * queries[:, None, :]
+        # sum over the features dimension
+        weights = torch.sum(weights, dim=2, keepdim=True)
+        # softmax with the row indices as the graph dimension
+        weights = torch_scatter.scatter_softmax(weights, row_indices, dim=0)
+
+        # look up the values
+        values = values.transpose(0, 1).reshape(graph_dim, -1)
+        values = nn.functional.embedding(col_indices, values).reshape(col_indices.shape[0], list_dim, self.val_dim)
+
+        # now we do values times weights and sum over the graph dimension
+        values = values * weights
+
         # sum over the lep dimension
-        weights = torch.sum(weights, dim=2)
-        # softmax over the graph dimension
-        weights = torch.sparse.softmax(weights, dim=1)
+        output = torch_scatter.scatter_sum(values, row_indices, dim=0)
 
-        # now we do v * weights (graph, graph, list, 1) * (1, graph, list, n_features)
-        output = weights[..., None] * torch.permute(values[None, ...], [0, 2, 1, 3])
-        # sum over the softmax dimension (graph, list, n_features)
-        output = torch.sum(output, dim=1).to_dense()
-
-        # final output
-        output = self.out(torch.permute(output, [1, 0, 2]))
+        # permute to list, graph, features
+        output = output.transpose(0, 1)
 
         # activation and layer norm
         output = self.silu(output)
@@ -137,7 +148,12 @@ class TPUGraphNetwork(nn.Module):
         self.projection_network = projection_network
         self.exp = exp
 
-    def forward(self, features: torch.Tensor, connection_matrix: torch.Tensor, lengths: list[int]):
+    def forward(
+        self,
+        features: torch.Tensor,
+        connection_matrix: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        lengths: list[int],
+    ):
         """
         Forward pass of the network
         :param features: The input features (multiple graphs concatenated)

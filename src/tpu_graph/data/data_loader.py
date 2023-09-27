@@ -88,7 +88,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         features = []
         times = []
         # for the connection matrices
-        indices = []
+        row_indices = []
+        col_indices = []
         values = []
         offset = 0
         # the individual length of the graphs
@@ -98,34 +99,36 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         for t in tensors:
             assert len(t) == 3, "The length of the tensors must be 3"
             node_feat, connection_matrix, config_runtime = t
+            row_ids, col_ids, vals = connection_matrix
 
             # append the tensors that need to go through the network
             features.append(node_feat)
             lengths.append(node_feat.shape[1])
             times.append(config_runtime)
-            indices.append(connection_matrix._indices() + offset)
+            row_indices.append(row_ids + offset)
+            col_indices.append(col_ids + offset)
+            values.append(vals)
             offset += node_feat.shape[1]
-            values.append(connection_matrix._values())
 
         # stack the tensors
         features = torch.Tensor(np.concatenate(features, axis=1)).to(device)
         times = torch.tensor(np.stack(times, axis=0), dtype=dtype).to(device)
-        indices = torch.cat(indices, dim=1)
-        values = torch.cat(values, dim=0)
-        connection_matrix = (
-            torch.sparse_coo_tensor(indices, values, (features.shape[1], features.shape[1], values.shape[1]))
-            .float()
-            .to(device)
-        )
+
+        # the connection matrix
+        row_indices = torch.tensor(np.concatenate(row_indices, axis=0), dtype=torch.long).to(device)
+        col_indices = torch.tensor(np.concatenate(col_indices, axis=0), dtype=torch.long).to(device)
+        values = torch.tensor(np.concatenate(values, axis=0), dtype=dtype).to(device)
+        connection_matrix = (row_indices, col_indices, values)
 
         return features, lengths, times, connection_matrix
 
-    def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False):
+    def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False, drop_last: bool = True):
         """
         Returns a dataloader for the dataset
         :param batch_size: The batch size to use
         :param shuffle: If True, the dataset is shuffled
         :param pin_memory: If True, the memory is pinned
+        :param drop_last: If True, the last batch is dropped if it is not full
         :return: The dataloader
         """
 
@@ -135,6 +138,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             shuffle=shuffle,
             pin_memory=pin_memory,
             collate_fn=self.collate_fn_tiles,
+            drop_last=drop_last,
         )
 
     def get_data_and_offset(self, idx):
@@ -210,9 +214,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
                 vals.append(lpe)
 
         # create the sparse connection matrix
-        connection_mat = torch.sparse_coo_tensor(
-            np.stack([row_ids, col_ids]), vals, (n_nodes - 1, n_nodes - 1, self.lpe_dim)
-        )
+        connection_mat = (np.array(row_ids, dtype=np.int32), np.array(col_ids, dtype=np.int32), np.stack(vals, axis=0))
 
         return graph, connection_mat
 
