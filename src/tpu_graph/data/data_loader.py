@@ -2,8 +2,6 @@ import os
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
-from scipy.sparse.linalg import eigsh
-from scipy.linalg import eigh
 import numba as nb
 import numpy as np
 import torch
@@ -25,7 +23,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         list_shuffle: bool = False,
         cache=False,
         cutoff: int = 3,
-        lpe_dim: int = 16,
+        decay: float = 0.5,
         clear_cache: bool = False,
     ):
         """
@@ -35,7 +33,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         :param list_shuffle: If True, the samples are shuffled before returning them
         :param cache: If True, the dataset is cached in memory and the preprocessed data is saved
         :param cutoff: The cutoff for the neighborhood in the connection matrix
-        :param lpe_dim: The dimension of the laplacian positional encoding
+        :param decay: The decay for the neighborhood in the connection matrix
         :param clear_cache: If True, the cache is cleared, meaning the preprocessed data is ignored
         """
 
@@ -43,7 +41,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.cutoff = cutoff
         self.list_size = list_size
         self.list_shuffle = list_shuffle
-        self.lpe_dim = lpe_dim
+        self.decay = decay
         self.clear_cache = clear_cache
 
         # get all the files
@@ -89,9 +87,11 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         features = []
         times = []
         # for the connection matrices
-        row_indices = []
+        row_indices = [np.array([0])]
+        row_offset = 0
         col_indices = []
-        offset = 0
+        col_offset = 0
+        distances = []
         # the individual length of the graphs
         lengths = []
 
@@ -99,15 +99,17 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         for t in tensors:
             assert len(t) == 3, "The length of the tensors must be 3"
             node_feat, connection_matrix, config_runtime = t
-            row_ids, col_ids = connection_matrix
+            row_ids, col_ids, dists = connection_matrix
 
             # append the tensors that need to go through the network
             features.append(node_feat)
             lengths.append(node_feat.shape[1])
             times.append(config_runtime)
-            row_indices.append(row_ids + offset)
-            col_indices.append(col_ids + offset)
-            offset += node_feat.shape[1]
+            row_indices.append(row_ids[1:] + row_offset)
+            row_offset += row_ids[-1]
+            col_indices.append(col_ids + col_offset)
+            col_offset += node_feat.shape[1]
+            distances.append(dists)
 
         # stack the tensors
         features = torch.Tensor(np.concatenate(features, axis=1)).to(device)
@@ -116,7 +118,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # the connection matrix
         row_indices = torch.tensor(np.concatenate(row_indices, axis=0), dtype=torch.long).to(device)
         col_indices = torch.tensor(np.concatenate(col_indices, axis=0), dtype=torch.long).to(device)
-        connection_matrix = (row_indices, col_indices)
+        distances = torch.tensor(np.concatenate(distances, axis=0), dtype=dtype).to(device)
+        connection_matrix = (row_indices, col_indices, distances)
 
         return features, lengths, times, connection_matrix
 
@@ -196,52 +199,27 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # create the graph, name it after the file name such that it has a unique name
         graph = Graph(n=n_nodes, edges=edge_index, directed=True)
 
-        # get the connection matrix (COO format) without the imaginary node
-        row_ids = []
+        # get the connection matrix (CSR format) without the imaginary node
+        row_ids = [0]
         col_ids = []
+        distances = []
         for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=0)[:-1]):
-            row_ids.extend([vertex_id] * len(neighborhood))
+            if len(neighborhood) == 0:
+                row_ids.append(row_ids[-1])
+                continue
+            row_ids.append(row_ids[-1] + len(neighborhood))
             col_ids.extend(neighborhood)
+            dists = self.decay ** np.array(graph.distances(source=vertex_id, target=neighborhood, mode="in")[0])
+            distances.append(dists / np.sum(dists))
 
         # create the sparse connection matrix
-        connection_mat = (np.array(row_ids, dtype=np.int32), np.array(col_ids, dtype=np.int32))
+        connection_mat = (
+            np.array(row_ids, dtype=np.int32),
+            np.array(col_ids, dtype=np.int32),
+            np.concatenate(distances),
+        )
 
         return graph, connection_mat
-
-    def calculate_lpe(self, graph: Graph):
-        """
-        Calculates the laplacian positional encoding for the given graph, taken from
-        pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/transforms/add_positional_encoding.html
-        :param graph: The graph to calculate the lpe for
-        :return: The lpe for the graph
-        """
-
-        # get the laplacian matrix
-        graph = graph.as_undirected()
-        laplacian = np.array(graph.laplacian(normalized=True))
-
-        # get the eigenvectors
-        try:
-            eig_vals, eig_vecs = eigsh(
-                laplacian,
-                k=self.lpe_dim + 1 if self.lpe_dim < laplacian.shape[0] else laplacian.shape[0] - 1,
-                which="SA",
-                return_eigenvectors=True,
-            )
-        except Exception as e:
-            logger.error(f"Could not calculate the eigenvectors for {graph} because of {e}")
-            logger.error("Using eigh instead")
-            eig_vals, eig_vecs = eigh(laplacian)
-
-        # sort the eigenvectors
-        eig_vecs = np.real(eig_vecs[:, eig_vals.argsort()])
-        eig_vecs = eig_vecs[:, 1 : self.lpe_dim + 1]
-
-        # pad if necessary
-        if eig_vecs.shape[1] != self.lpe_dim:
-            eig_vecs = np.pad(eig_vecs, ((0, 0), (0, self.lpe_dim - eig_vecs.shape[1])))
-
-        return eig_vecs
 
     def read_data(self, data: dict[str : np.ndarray]):
         """
@@ -281,10 +259,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         graph["name"] = filename
 
         # unpack the connection matrix and save in the data dict
-        data["row_indices"], data["col_indices"] = connection_matrix
-
-        # calculate the lpe
-        data["lpe"] = self.calculate_lpe(graph)
+        data["row_indices"], data["col_indices"], data["distances"] = connection_matrix
 
         # the indices of the samples
         data["indices"] = np.arange(len(data["config_runtime"]))
@@ -361,8 +336,7 @@ class TileDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        lpe = data["lpe"]
-        connection_matrix = (data["row_indices"], data["col_indices"])
+        connection_matrix = (data["row_indices"], data["col_indices"], data["distances"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -374,9 +348,8 @@ class TileDataset(TPUGraphDataset):
         # tile config_features such that axis 0 matches with the number of nodes
         config_feat = np.tile(config_feat, (node_feat.shape[0], 1, 1)).transpose((1, 0, 2))
         node_feat = np.tile(node_feat, (self.list_size, 1, 1))
-        lpe = np.tile(lpe[:-1], (self.list_size, 1, 1))
         node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
-        features = np.concatenate([node_opcode, node_feat[:], lpe, config_feat], axis=2)
+        features = np.concatenate([node_opcode, node_feat[:], config_feat], axis=2)
 
         return features, connection_matrix, config_runtime
 

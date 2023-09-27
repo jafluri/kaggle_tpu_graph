@@ -118,8 +118,6 @@ def train_tile_network(**kwargs):
     # we build a super simple network for starters
     logger.info("Building the network")
     input_dim = 159 if kwargs["layout_network"] else 165
-    # add the lpe dimension
-    input_dim += 16
     # deal with the embedding
     input_dim += 31
 

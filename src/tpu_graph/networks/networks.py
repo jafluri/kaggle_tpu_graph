@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch_geometric.utils import segment, softmax
 import torch_scatter
 from torch import nn
 
@@ -70,7 +71,7 @@ class BatchedSemiAttention(nn.Module):
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(val_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -79,12 +80,16 @@ class BatchedSemiAttention(nn.Module):
 
         # unpack the input tensors
         x, connection_matrix = inp_tensors
-        row_indices, col_indices = connection_matrix
+        row_indices, col_indices, dists = connection_matrix
+
+        # ge the queries
+        collection_matrix = torch.sparse_csc_tensor(row_indices, col_indices, dists, size=(x.shape[1], x.shape[1]))
+        queries = torch.matmul(collection_matrix, x)
+        queries = self.q(queries)
 
         # get the keys and values
         keys = self.k(x)
         values = self.v(x)
-        queries = self.q(x)
 
         # we need to reshape the keys for the embedding lookup (list, graph, features) -> (graph, -1)
         list_dim, graph_dim, key_dim = keys.shape
@@ -100,7 +105,7 @@ class BatchedSemiAttention(nn.Module):
         # sum over the features dimension
         weights = torch.sum(weights, dim=2, keepdim=True)
         # softmax with the row indices as the graph dimension
-        weights = torch_scatter.scatter_softmax(weights, row_indices, dim=0)
+        weights = softmax(weights, ptr=row_indices, dim=0)
 
         # look up the values
         values = values.transpose(0, 1).reshape(graph_dim, -1)
@@ -110,7 +115,7 @@ class BatchedSemiAttention(nn.Module):
         values = values * weights
 
         # sum over the lep dimension
-        output = torch_scatter.scatter_sum(values, row_indices, dim=0)
+        output = segment(values, row_indices)
 
         # permute to list, graph, features
         output = output.transpose(0, 1)
@@ -157,7 +162,7 @@ class TPUGraphNetwork(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        connection_matrix: tuple[torch.Tensor, torch.Tensor],
+        connection_matrix: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         lengths: list[int],
     ):
         """
