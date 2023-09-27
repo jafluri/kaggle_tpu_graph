@@ -1,32 +1,5 @@
 import torch as _torch
-
-
-def batch_pairs(x: _torch.Tensor) -> _torch.Tensor:
-    """Returns a pair matrix
-
-    This matrix contains all pairs (i, j) as follows:
-        p[_, i, j, 0] = x[_, i]
-        p[_, i, j, 1] = x[_, j]
-
-    Args:
-        x: The input batch of dimension (batch_size, list_size) or
-            (batch_size, list_size, 1).
-
-    Returns:
-        Two tensors of size (batch_size, list_size ^ 2, 2) containing
-        all pairs.
-    """
-
-    if x.dim() == 2:
-        x = x.reshape((x.shape[0], x.shape[1], 1))
-
-    # Construct broadcasted x_{:,i,0...list_size}
-    x_ij = _torch.repeat_interleave(x, x.shape[1], dim=2)
-
-    # Construct broadcasted x_{:,0...list_size,i}
-    x_ji = _torch.repeat_interleave(x.permute(0, 2, 1), x.shape[1], dim=1)
-
-    return _torch.stack([x_ij, x_ji], dim=3)
+from .utils import batch_pairs
 
 
 class _PairwiseAdditiveLoss(_torch.nn.Module):

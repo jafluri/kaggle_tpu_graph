@@ -3,6 +3,7 @@ from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
 from scipy.sparse.linalg import eigsh
+from scipy.linalg import eigh
 import numba as nb
 import numpy as np
 import torch
@@ -24,26 +25,26 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         list_shuffle: bool = False,
         cache=False,
         cutoff: int = 3,
-        decay: float = 0.5,
         lpe_dim: int = 16,
+        clear_cache: bool = False,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
         :param data_path: The directory containing the NPZ files that will be loaded, can also be a list of directories
         :param list_size: The number of samples that are returned per graph
         :param list_shuffle: If True, the samples are shuffled before returning them
-        :param cache: If True, the dataset is cached in memory
-        :param cutoff: The cutoff for the shortest path connection matrix
-        :param decay: The decay for the shortest path connection matrix
+        :param cache: If True, the dataset is cached in memory and the preprocessed data is saved
+        :param cutoff: The cutoff for the neighborhood in the connection matrix
         :param lpe_dim: The dimension of the laplacian positional encoding
+        :param clear_cache: If True, the cache is cleared, meaning the preprocessed data is ignored
         """
 
         # save the attributes
         self.cutoff = cutoff
         self.list_size = list_size
         self.list_shuffle = list_shuffle
-        self.decay = decay
         self.lpe_dim = lpe_dim
+        self.clear_cache = clear_cache
 
         # get all the files
         if not isinstance(data_path, list):
@@ -53,7 +54,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = sorted(path.glob("*.npz"))
+            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -228,24 +229,28 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # get the laplacian matrix
         graph = graph.as_undirected()
-        laplacian = np.array(graph.laplacian(mode="in", normalized=True))
+        laplacian = np.array(graph.laplacian(normalized=True))
 
         # get the eigenvectors
-        eig_vals, eig_vecs = eigsh(
-            laplacian,
-            k=self.lpe_dim + 1 if self.lpe_dim < laplacian.shape[0] else laplacian.shape[0] - 1,
-            which="SA",
-            return_eigenvectors=True,
-        )
+        try:
+            eig_vals, eig_vecs = eigsh(
+                laplacian,
+                k=self.lpe_dim + 1 if self.lpe_dim < laplacian.shape[0] else laplacian.shape[0] - 1,
+                which="SA",
+                return_eigenvectors=True,
+            )
+        except Exception as e:
+            logger.error(f"Could not calculate the eigenvectors for {graph} because of {e}")
+            logger.error("Using eigh instead")
+            eig_vals, eig_vecs = eigh(laplacian)
 
         # sort the eigenvectors
         eig_vecs = np.real(eig_vecs[:, eig_vals.argsort()])
+        eig_vecs = eig_vecs[:, 1 : self.lpe_dim + 1]
 
         # pad if necessary
-        if self.lpe_dim < laplacian.shape[0]:
-            eig_vecs = eig_vecs[:, 1:]
-        else:
-            eig_vecs = np.pad(eig_vecs, ((0, 0), (0, self.lpe_dim - laplacian.shape[0] + 1)))
+        if eig_vecs.shape[1] != self.lpe_dim:
+            eig_vecs = np.pad(eig_vecs, ((0, 0), (0, self.lpe_dim - eig_vecs.shape[1])))
 
         return eig_vecs
 
@@ -258,6 +263,22 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # read out the data
         filename = data.zip.filename
+        cache_path = self._fname_to_cache_path(filename)
+
+        if self.clear_cache and cache_path.exists():
+            os.remove(cache_path)
+
+        # if we cached the file we load it from the cache
+        if self.cache and cache_path.exists():
+            try:
+                _data = np.load(cache_path, allow_pickle=True)
+                _data = {k: v for k, v in _data.items()}
+                return _data
+            except Exception as e:
+                logger.error(f"Could not load {cache_path} because of {e}")
+                logger.error("Loading from original file")
+
+        # we need to convert the data to a dict because of the caching
         data = {k: v for k, v in data.items()}
 
         # read out the data for this graph
@@ -269,8 +290,9 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             n_nodes=len(node_feat) + 1, edge_index=data["edge_index"]
         )
         graph["name"] = filename
-        data["graph"] = graph
-        data["connection_matrix"] = connection_matrix
+
+        # unpack the connection matrix and save in the data dict
+        data["row_indices"], data["col_indices"], data["values"] = connection_matrix
 
         # calculate the lpe
         data["lpe"] = self.calculate_lpe(graph)
@@ -280,7 +302,23 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         if self.list_shuffle:
             np.random.shuffle(data["indices"])
 
+        # we write the file uncompressed back if caching is enabled
+        if self.cache:
+            np.savez(cache_path, **data, allow_pickle=True)
+
         return data
+
+    def _fname_to_cache_path(self, fname):
+        """
+        Returns the path to the cached file
+        :param fname: The filename
+        :return: The path to the cached file
+        """
+
+        fname = Path(fname)
+        cache_name = fname.parent.joinpath(fname.stem + "_cached.npz")
+
+        return cache_name
 
     def __len__(self):
         """
@@ -297,7 +335,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         """
 
 
-@nb.njit(nb.float32[:, :](nb.int64, nb.int64[:], nb.float32[:, :]))
+@nb.njit(nb.float32[:, :, :](nb.int64, nb.int64[:], nb.float32[:, :, :]))
 def fill_config_feat(n_nodes, node_config_ids: np.ndarray, node_config_feat: np.ndarray):
     """
     This routine is meant for the layout dataset.
@@ -309,9 +347,9 @@ def fill_config_feat(n_nodes, node_config_ids: np.ndarray, node_config_feat: np.
     """
 
     # we make fill all missing config features with 0
-    padded_config_feat = np.zeros((n_nodes, node_config_feat.shape[1]), dtype=np.float32)
+    padded_config_feat = np.zeros((node_config_feat.shape[0], n_nodes, node_config_feat.shape[2]), dtype=np.float32)
     for num, idx in enumerate(node_config_ids):
-        padded_config_feat[idx, :] = node_config_feat[num, :]
+        padded_config_feat[:, idx, :] = node_config_feat[:, num, :]
 
     return padded_config_feat
 
@@ -335,7 +373,7 @@ class TileDataset(TPUGraphDataset):
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
         lpe = data["lpe"]
-        connection_matrix = data["connection_matrix"]
+        connection_matrix = (data["row_indices"], data["col_indices"], data["values"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -372,21 +410,24 @@ class LayoutDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        edge_index = data["edge_index"]
-        graph = data["graph"]
-        connection_matrix = data["connection_matrix"]
+        lpe = data["lpe"]
+        connection_matrix = (data["row_indices"], data["col_indices"], data["values"])
 
         # read out the specific config
-        config_feat = data["node_config_feat"][offset]
+        indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
+        config_feat = data["node_config_feat"][indices]
         node_config_ids = data["node_config_ids"]
 
         # fill the config features
         config_feat = fill_config_feat(len(node_feat), node_config_ids, config_feat)
 
         # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
-        config_runtime = data["config_runtime"][offset]
+        config_runtime = data["config_runtime"][indices]
 
         # tile config_features such that axis 0 matches with the number of nodes
-        features = np.concatenate([node_opcode[:, None], node_feat, config_feat], axis=1)
+        lpe = np.tile(lpe[:-1], (self.list_size, 1, 1))
+        node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
+        node_feat = np.tile(node_feat, (self.list_size, 1, 1))
+        features = np.concatenate([node_opcode, node_feat, lpe, config_feat], axis=2)
 
-        return features, config_runtime, edge_index, connection_matrix, graph
+        return features, connection_matrix, config_runtime

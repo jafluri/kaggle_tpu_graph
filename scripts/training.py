@@ -8,7 +8,7 @@ from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer, BatchedSemiAttention
 from tpu_graph.training import evaluation
-from tpu_graph.training.ltr import PairwiseHingeLoss
+from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
 from tqdm import tqdm
 
 import wandb
@@ -44,29 +44,18 @@ import wandb
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
 @click.option("--cache", is_flag=True, help="If set, the dataset is cached in memory")
 @click.option(
-    "--mse",
-    is_flag=True,
-    help="If set, the mean squared error is used as loss function, otherwise the mean log squared error is used.",
-)
-@click.option(
     "--layout_network",
     is_flag=True,
     help="If set, the layout network is trained, this changes the input dimension from 165 (tile network) "
     "to 159 (layout network)",
 )
-@click.option(
-    "--p_update_path",
-    type=float,
-    default=1.0,
-    help="The probability to update the path in the network for a given graph during training",
-)
-@click.option(
-    "--fast_eval",
-    is_flag=True,
-    help="If set, we calculate the longest path only once and use it for all iterations of the same graph "
-    "during the evaluation",
-)
 @click.option("--exp_pred", is_flag=True, help="If set, the prediction is taken as the exponential of the output")
+@click.option(
+    "--list_size",
+    type=int,
+    default=16,
+    help="The list size to use for the training (number of samples per graph in the batch)",
+)
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -91,8 +80,8 @@ def train_tile_network(**kwargs):
             "batch_size": kwargs["batch_size"],
             "cosine_annealing": kwargs["cosine_annealing"],
             "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
-            "loss_type": "MSE" if kwargs["mse"] else "Log MSE",
-            "p_update_path": kwargs["p_update_path"],
+            "exp_pred": kwargs["exp_pred"],
+            "list_size": kwargs["list_size"],
         },
     )
 
@@ -106,7 +95,9 @@ def train_tile_network(**kwargs):
     dataset_class = LayoutDataset if kwargs["layout_network"] else TileDataset
 
     logger.info("Loading the dataset for training")
-    train_dataset = dataset_class([base_path.joinpath("train") for base_path in base_paths], cache=kwargs["cache"])
+    train_dataset = dataset_class(
+        [base_path.joinpath("train") for base_path in base_paths], cache=kwargs["cache"], list_size=kwargs["list_size"]
+    )
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     logger.info("Loading the dataset for validation")
