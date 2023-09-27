@@ -65,6 +65,7 @@ class BatchedSemiAttention(nn.Module):
         # init the layers
         self.k = nn.Linear(inp_dim, key_dim)
         self.v = nn.Linear(inp_dim, val_dim)
+        self.q = nn.Linear(key_dim, key_dim)
         self.out = nn.Linear(val_dim, val_dim)
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(val_dim)
@@ -83,6 +84,7 @@ class BatchedSemiAttention(nn.Module):
         # get the keys and values
         keys = self.k(x)
         values = self.v(x)
+        queries = self.q(queries)
 
         # we need to reshape the keys for the embedding lookup (list, graph, features) -> (graph, -1)
         list_dim, graph_dim, key_dim = keys.shape
