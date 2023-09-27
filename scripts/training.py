@@ -8,7 +8,7 @@ from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, EmeddingInputLayer, BatchedSemiAttention
 from tpu_graph.training import evaluation
-from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
+from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
 
 import wandb
@@ -158,7 +158,7 @@ def train_tile_network(**kwargs):
     save_path.mkdir(parents=True, exist_ok=True)
 
     # create the loss fn
-    loss_class = PairwiseHingeLoss()
+    loss_class = PairwiseDCGHingeLoss()
 
     batch_pad = torch.ones(kwargs["batch_size"]).long().to("cuda") * train_dataset.list_size
 
