@@ -166,8 +166,10 @@ def train_tile_network(**kwargs):
     # create the loss fn
     loss_class = PairwiseHingeLoss()
 
+    batch_pad = torch.ones(kwargs["batch_size"]).long().to("cuda") * train_dataset.list_size
+
     def loss_fn(pred, label):
-        loss_class(pred, label, torch.ones(train_dataset.list_size).long().to("cuda") * train_dataset.list_size)
+        loss_class(pred, label, batch_pad)
 
     # start the training loop
     logger.info("Starting the training loop")
