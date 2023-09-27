@@ -200,9 +200,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         row_ids = []
         col_ids = []
         for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=0)[:-1]):
-            for neighbor in neighborhood:
-                row_ids.append(vertex_id)
-                col_ids.append(neighbor)
+            row_ids.extend([vertex_id] * len(neighborhood))
+            col_ids.extend(neighborhood)
 
         # create the sparse connection matrix
         connection_mat = (np.array(row_ids, dtype=np.int32), np.array(col_ids, dtype=np.int32))
