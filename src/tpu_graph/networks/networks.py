@@ -137,7 +137,7 @@ class TPUGraphNetwork(nn.Module):
         :param embedding_layer: A layer that embeds the first column of the input for the op code
         :param local_transformer_network: A list of batched semi attention layers
         :param projection_network: A network that projects the output of the transformer network to the output dimension
-        :param exp: Exponentiate the output (makes stuff additive in the loss)
+        :param exp: Exponentiate the output (makes stuff additive in the loss) if False, take the absolute value
         :param kwargs: Additional arguments for the super class
         """
 
@@ -177,6 +177,8 @@ class TPUGraphNetwork(nn.Module):
         # exp the output if necessary
         if self.exp:
             runtimes = torch.exp(runtimes)
+        else:
+            runtimes = torch.abs(runtimes)
 
         # sum over the graphs
         runtimes = torch_scatter.scatter_sum(runtimes, index=index, dim=1)
