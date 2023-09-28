@@ -121,7 +121,7 @@ class BatchedSemiAttention(nn.Module):
         output = output.transpose(0, 1)
 
         # activation and layer norm
-        output = self.silu(output) + x
+        output = self.silu(output)
         output = self.layernorm(output)
 
         # we output the connection matrix for the next layer
