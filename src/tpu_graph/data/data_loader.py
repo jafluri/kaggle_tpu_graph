@@ -20,7 +20,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
     def __init__(
         self,
         data_path: str | bytes | os.PathLike | list[str | bytes | os.PathLike],
-        list_size: int = 16,
+        list_size: int = 32,
         list_shuffle: bool = False,
         cache=False,
         cutoff: int = 3,
