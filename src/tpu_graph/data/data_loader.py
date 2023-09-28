@@ -24,7 +24,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         list_shuffle: bool = False,
         cache=False,
         cutoff: int = 3,
-        clear_cache: bool = True,
+        clear_cache: bool = False,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -371,7 +371,7 @@ class LayoutDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        connection_matrix = (data["row_indices"], data["col_indices"], data["distances"])
+        connection_matrix = (data["row_indices"], data["col_indices"], data["edge_codes"])
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
