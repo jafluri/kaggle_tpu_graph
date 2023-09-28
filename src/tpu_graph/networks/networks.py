@@ -65,7 +65,7 @@ class BatchedSemiAttention(nn.Module):
         # init the layers
         self.k = nn.Linear(inp_dim, key_dim)
         self.v = nn.Linear(inp_dim, val_dim)
-        self.q = nn.Linear(key_dim, key_dim)
+        self.q = nn.Linear(inp_dim, key_dim)
         self.out = nn.Linear(val_dim, val_dim)
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(val_dim)
@@ -79,20 +79,24 @@ class BatchedSemiAttention(nn.Module):
 
         # unpack the input tensors
         x, connection_matrix = inp_tensors
-        row_indices, col_indices, queries = connection_matrix
+        row_indices, col_indices, _ = connection_matrix
 
         # get the keys and values
         keys = self.k(x)
         values = self.v(x)
-        queries = self.q(queries)
+        queries = self.q(x)
 
         # we need to reshape the keys for the embedding lookup (list, graph, features) -> (graph, -1)
         list_dim, graph_dim, key_dim = keys.shape
         keys = keys.transpose(0, 1).reshape(graph_dim, -1)
         keys = nn.functional.embedding(col_indices, keys).reshape(col_indices.shape[0], list_dim, key_dim)
 
+        # same for the queries
+        queries = queries.transpose(0, 1).reshape(graph_dim, -1)
+        queries = nn.functional.embedding(col_indices, queries).reshape(col_indices.shape[0], list_dim, key_dim)
+
         # we multiply the keys with the queries (graph, list, features) * (graph, list, features)
-        weights = keys * queries[:, None, :]
+        weights = keys * queries
         # sum over the features dimension
         weights = torch.sum(weights, dim=2, keepdim=True)
         # softmax with the row indices as the graph dimension
