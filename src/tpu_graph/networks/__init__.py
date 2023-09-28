@@ -1,4 +1,4 @@
-from .networks import TPUGraphNetwork, EmeddingInputLayer, BatchedSemiAttention
+from .networks import TPUGraphNetwork, EmeddingInputLayer, BatchedMessagePassing
 
 # This is Pep compliant
-__all__ = ["TPUGraphNetwork", "EmeddingInputLayer", "BatchedSemiAttention"]
+__all__ = ["TPUGraphNetwork", "EmeddingInputLayer", "BatchedMessagePassing"]

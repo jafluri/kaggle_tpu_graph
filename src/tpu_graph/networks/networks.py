@@ -1,8 +1,9 @@
 import numpy as np
 import torch
-from torch_geometric.utils import segment, softmax
 import torch_scatter
 from torch import nn
+from tpu_graph.constants import MAX_OP_CODE
+from tpu_graph.utils.sparse_gradients import sparse_mm
 
 
 class EmeddingInputLayer(nn.Module):
@@ -42,17 +43,16 @@ class EmeddingInputLayer(nn.Module):
         return torch.concatenate([embedding, x[..., 1:]], dim=-1)
 
 
-class BatchedSemiAttention(nn.Module):
+class BatchedMessagePassing(nn.Module):
     """
     Implements the scaled dot product attention with batching over one large tensor using the scatter library
     """
 
-    def __init__(self, inp_dim: int, val_dim: int, key_dim: int):
+    def __init__(self, inp_dim: int, out_dim: int):
         """
         Init the layer
         :param inp_dim: The input dimension
-        :param val_dim: The embedding dimension
-        :param key_dim: The key dimension
+        :param out_dim: The output dimension
         """
 
         # init the super class
@@ -60,18 +60,14 @@ class BatchedSemiAttention(nn.Module):
 
         # save attributes
         self.inp_dim = inp_dim
-        self.val_dim = val_dim
-        self.key_dim = key_dim
+        self.out_dim = out_dim
 
         # init the layers
-        self.k = nn.Linear(inp_dim, key_dim)
-        self.v = nn.Linear(inp_dim, val_dim)
-        self.q = nn.Linear(inp_dim, key_dim)
-        self.out = nn.Linear(val_dim, val_dim)
+        self.linear = nn.Linear(inp_dim, out_dim)
         self.silu = nn.SiLU()
-        self.layernorm = nn.LayerNorm(val_dim)
+        self.layernorm = nn.LayerNorm(out_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -80,48 +76,24 @@ class BatchedSemiAttention(nn.Module):
 
         # unpack the input tensors
         x, connection_matrix = inp_tensors
-        row_indices, col_indices, dists = connection_matrix
 
-        # ge the queries
-        collection_matrix = torch.sparse_csc_tensor(row_indices, col_indices, dists, size=(x.shape[1], x.shape[1]))
-        queries = torch.matmul(collection_matrix, x)
-        queries = self.q(queries)
+        # get the input dimension
+        list_dim, graph_dim, inp_dim = x.shape
 
-        # get the keys and values
-        keys = self.k(x)
-        values = self.v(x)
+        # (list, graph, inp) -> (graph, inp * list)
+        x = x.transpose(0, 1).reshape(graph_dim, -1)
 
-        # we need to reshape the keys for the embedding lookup (list, graph, features) -> (graph, -1)
-        list_dim, graph_dim, key_dim = keys.shape
-        keys = keys.transpose(0, 1).reshape(graph_dim, -1)
-        keys = nn.functional.embedding(col_indices, keys).reshape(col_indices.shape[0], list_dim, key_dim)
+        # apply the connection matrix
+        x = sparse_mm(connection_matrix, x)
 
-        # same for the queries
-        queries = queries.transpose(0, 1).reshape(graph_dim, -1)
-        queries = nn.functional.embedding(col_indices, queries).reshape(col_indices.shape[0], list_dim, key_dim)
+        # back to (list, graph, inp)
+        x = x.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
 
-        # we multiply the keys with the queries (graph, list, features) * (graph, list, features)
-        weights = keys * queries
-        # sum over the features dimension
-        weights = torch.sum(weights, dim=2, keepdim=True)
-        # softmax with the row indices as the graph dimension
-        weights = softmax(weights, ptr=row_indices, dim=0)
-
-        # look up the values
-        values = values.transpose(0, 1).reshape(graph_dim, -1)
-        values = nn.functional.embedding(col_indices, values).reshape(col_indices.shape[0], list_dim, self.val_dim)
-
-        # now we do values times weights and sum over the graph dimension
-        values = values * weights
-
-        # sum over the lep dimension
-        output = segment(values, row_indices)
-
-        # permute to list, graph, features
-        output = output.transpose(0, 1)
+        # the forward pass
+        x = self.linear(x)
 
         # activation and layer norm
-        output = self.silu(output)
+        output = self.silu(x)
         output = self.layernorm(output)
 
         # we output the connection matrix for the next layer
@@ -135,16 +107,17 @@ class TPUGraphNetwork(nn.Module):
 
     def __init__(
         self,
-        embedding_layer: EmeddingInputLayer,
-        local_transformer_network: nn.Sequential,
+        message_network: nn.Sequential,
         projection_network: nn.Module,
+        op_embedding_dim: int = 32,
+        n_edge_types: int = 512,
         exp: bool = False,
         **kwargs,
     ):
         """
         Init the network
         :param embedding_layer: A layer that embeds the first column of the input for the op code
-        :param local_transformer_network: A list of batched semi attention layers
+        :param message_network: A network that performs the message passing
         :param projection_network: A network that projects the output of the transformer network to the output dimension
         :param exp: Exponentiate the output (makes stuff additive in the loss) if False, take the absolute value
         :param kwargs: Additional arguments for the super class
@@ -154,8 +127,9 @@ class TPUGraphNetwork(nn.Module):
         super().__init__(**kwargs)
 
         # save attributes
-        self.embedding_layer = embedding_layer
-        self.local_transformer_network = local_transformer_network
+        self.embedding_layer = EmeddingInputLayer(op_embedding_dim, MAX_OP_CODE)
+        self.edge_embedding = nn.Embedding(n_edge_types, 1)
+        self.message_network = message_network
         self.projection_network = projection_network
         self.exp = exp
 
@@ -176,11 +150,17 @@ class TPUGraphNetwork(nn.Module):
         # create and index for the scatter sum
         index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to("cuda")
 
+        # build the connection matrix
+        row_indices, col_indices, dists = connection_matrix
+        indices = torch.stack([row_indices, col_indices], dim=0)
+        edge_types = self.edge_embedding(dists).squeeze()
+        connection_matrix = torch.sparse_coo_tensor(indices, edge_types, size=(features.shape[1], features.shape[1]))
+
         # embed the first column
         emb_features = self.embedding_layer(features)
 
         # apply the transformer networks
-        graph_embedding, _ = self.local_transformer_network((emb_features, connection_matrix))
+        graph_embedding, _ = self.message_network((emb_features, connection_matrix))
         runtimes = self.projection_network(graph_embedding)
 
         # exp the output if necessary
