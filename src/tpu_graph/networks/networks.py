@@ -3,7 +3,6 @@ import torch
 import torch_scatter
 from torch import nn
 from tpu_graph.constants import MAX_OP_CODE
-from tpu_graph.utils.sparse_gradients import sparse_mm
 
 
 class EmeddingInputLayer(nn.Module):
@@ -84,7 +83,7 @@ class BatchedMessagePassing(nn.Module):
         x = x.transpose(0, 1).reshape(graph_dim, -1)
 
         # apply the connection matrix
-        x = sparse_mm(connection_matrix, x)
+        x = torch.mm(connection_matrix, x)
 
         # back to (list, graph, inp)
         x = x.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
@@ -111,6 +110,7 @@ class TPUGraphNetwork(nn.Module):
         projection_network: nn.Module,
         op_embedding_dim: int = 32,
         n_edge_types: int = 512,
+        decay: float = 0.5,
         exp: bool = False,
         **kwargs,
     ):
@@ -128,10 +128,13 @@ class TPUGraphNetwork(nn.Module):
 
         # save attributes
         self.embedding_layer = EmeddingInputLayer(op_embedding_dim, MAX_OP_CODE)
-        self.edge_embedding = nn.Embedding(n_edge_types, 1)
         self.message_network = message_network
         self.projection_network = projection_network
         self.exp = exp
+
+        # create the dists
+        dists = decay ** (np.arange(n_edge_types) % MAX_OP_CODE)
+        self.dists = torch.Tensor(dists).reshape(-1, 1)
 
     def forward(
         self,
@@ -151,10 +154,13 @@ class TPUGraphNetwork(nn.Module):
         index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to("cuda")
 
         # build the connection matrix
-        row_indices, col_indices, dists = connection_matrix
-        indices = torch.stack([row_indices, col_indices], dim=0)
-        edge_types = self.edge_embedding(dists).squeeze()
-        connection_matrix = torch.sparse_coo_tensor(indices, edge_types, size=(features.shape[1], features.shape[1]))
+        with torch.no_grad():
+            row_indices, col_indices, edge_codes = connection_matrix
+            indices = torch.stack([row_indices, col_indices], dim=0)
+            edge_types = torch.squeeze(nn.functional.embedding(edge_codes, self.dists.to(edge_codes.device)))
+            connection_matrix = torch.sparse_coo_tensor(
+                indices, edge_types, size=(features.shape[1], features.shape[1])
+            )
 
         # embed the first column
         emb_features = self.embedding_layer(features)
