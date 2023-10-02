@@ -132,8 +132,8 @@ class TPUGraphNetwork(nn.Module):
         self.projection_network = projection_network
         self.exp = exp
 
-        # create the dists
-        dists = decay ** (np.arange(n_edge_types) % MAX_OP_CODE)
+        # create the dists (we do log dists because we normalize with softmax)
+        dists = (np.arange(n_edge_types) % MAX_OP_CODE) * np.log(decay)
         self.dists = torch.Tensor(dists).reshape(-1, 1)
 
     def forward(
@@ -161,6 +161,8 @@ class TPUGraphNetwork(nn.Module):
             connection_matrix = torch.sparse_coo_tensor(
                 indices, edge_types, size=(features.shape[1], features.shape[1])
             )
+            # normalize the connection matrix
+            connection_matrix = torch.sparse.softmax(connection_matrix, dim=1)
 
         # embed the first column
         emb_features = self.embedding_layer(features)
