@@ -301,8 +301,6 @@ class TPUGraphNetwork(nn.Module):
         # exp the output if necessary
         if self.exp:
             runtimes = torch.exp(runtimes)
-        else:
-            runtimes = torch.abs(runtimes)
 
         # sum over the graphs
         runtimes = torch_scatter.scatter_sum(runtimes, index=index, dim=1)
