@@ -83,6 +83,7 @@ class SAGEConv(nn.Module):
         self.linear = nn.Linear(in_channels, out_channels, bias=True)
         self.agg_linear = nn.Linear(in_channels, out_channels, bias=False)
         self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels)
 
     def forward(self, inp_tensors: tuple[torch.Tensor, torch.Tensor]):
         """
@@ -114,6 +115,7 @@ class SAGEConv(nn.Module):
 
         # the output
         output = self.silu(projection + agg_projection)
+        output = self.layernorm(output)
 
         return output, connection_matrix
 
