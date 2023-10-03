@@ -57,8 +57,7 @@ import wandb
     default=16,
     help="The list size to use for the training (number of samples per graph in the batch)",
 )
-@click.option("--weight_decay", type=float, default=0.01, help="The weight decay to use for training")
-@click.option("--norm_penalty", type=float, default=1e-4, help="The norm penalty to use for training")
+@click.option("--weight_decay", type=float, default=0.0, help="The weight decay to use for training")
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -130,13 +129,13 @@ def train_tile_network(**kwargs):
     input_dim = 159 if kwargs["layout_network"] else 165
     # the position embedding
     input_dim += 16
-    # the op embedding
-    input_dim += 31
 
-    message_network = nn.Sequential(GPSConv(input_dim, 128), GPSConv(128, 128), GPSConv(128, 128))
+    message_network = nn.Sequential(GPSConv(128, 128), GPSConv(128, 128), GPSConv(128, 128))
     projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
+        in_channels=input_dim,
+        out_channels=128,
         message_network=message_network,
         projection_network=projection_network,
         exp=kwargs["exp_pred"],
@@ -180,11 +179,6 @@ def train_tile_network(**kwargs):
             pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
             summaries = {"loss": loss.item()}
-
-            # the norm penalty
-            norm_penalty = torch.norm(network.projection_network.weight, p=2)
-            summaries["norm_penalty"] = norm_penalty.item()
-            loss += kwargs["norm_penalty"] * norm_penalty
 
             # log the loss to the logger
             pbar.set_postfix({"loss": loss.item()})

@@ -10,9 +10,11 @@ class EmbeddingInputLayer(nn.Module):
     This is just a layer that splits of the first column of the input and embeds it
     """
 
-    def __init__(self, emb_size: int = 32, num_embeddings: int = 128):
+    def __init__(self, in_channels: int, out_channels: int, emb_size: int = 32, num_embeddings: int = 128):
         """
         Inits the layer
+        :param in_channels: The number of input channels without the embedding
+        :param out_channels: The number of output channels after the projection
         :param emb_size: The size of the embedding
         :param num_embeddings: The number of embeddings
         """
@@ -27,6 +29,11 @@ class EmbeddingInputLayer(nn.Module):
         # init the embedding
         self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
 
+        # the other layers
+        self.linear = nn.Linear(in_channels + emb_size - 1, out_channels, bias=True)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels)
+
     def forward(self, x: torch.Tensor):
         """
         Forward pass of the layer
@@ -39,8 +46,14 @@ class EmbeddingInputLayer(nn.Module):
 
         # embed the first column
         embedding = self.emb(op_code)
+        x = torch.concatenate([embedding, x[..., 1:]], dim=-1)
 
-        return torch.concatenate([embedding, x[..., 1:]], dim=-1)
+        # project
+        x = self.linear(x)
+        x = self.silu(x)
+        x = self.layernorm(x)
+
+        return x
 
 
 class SAGEConv(nn.Module):
@@ -240,19 +253,21 @@ class TPUGraphNetwork(nn.Module):
 
     def __init__(
         self,
+        in_channels: int,
+        out_channels: int,
         message_network: nn.Sequential,
         projection_network: nn.Module,
         op_embedding_dim: int = 32,
-        n_edge_types: int = 512,
-        decay: float = 0.5,
         exp: bool = False,
         **kwargs,
     ):
         """
         Init the network
-        :param embedding_layer: A layer that embeds the first column of the input for the op code
+        :param in_channels: The number of input channels
+        :param out_channels: The number of output channels
         :param message_network: A network that performs the message passing
         :param projection_network: A network that projects the output of the transformer network to the output dimension
+        :param op_embedding_dim: The dimension of the op embedding
         :param kwargs: Additional arguments for the super class
         """
 
@@ -260,7 +275,7 @@ class TPUGraphNetwork(nn.Module):
         super().__init__(**kwargs)
 
         # save attributes
-        self.embedding_layer = EmbeddingInputLayer(op_embedding_dim, MAX_OP_CODE)
+        self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
         self.exp = exp
