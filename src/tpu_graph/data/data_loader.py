@@ -7,10 +7,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torch_geometric.data import Data
-from torch_geometric.transforms import AddRandomWalkPE
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
 from tpu_graph.constants import PROD_FEATURES
+from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
 
@@ -174,7 +174,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         with torch.no_grad():
             # create the graph (we need to add self loops and reverse edges)
-            edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
+            # edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
             edge_index = torch.tensor(edge_index, dtype=torch.long)
             edge_index = add_self_loops(edge_index, num_nodes=n_nodes)[0]
             x = torch.ones((n_nodes, 1))
