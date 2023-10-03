@@ -217,7 +217,7 @@ class GPSConv(nn.Module):
         # init the layers
         self.sage_conv = SAGEConv(inp_dim, out_dim)
         self.attention = RetentiveAttention(inp_dim, out_dim)
-        self.linear = nn.Linear(out_dim, out_dim)
+        self.linear = nn.Linear(2 * out_dim, out_dim)
         self.silu = nn.SiLU()
         self.layernorm = nn.LayerNorm(out_dim)
 
@@ -236,7 +236,7 @@ class GPSConv(nn.Module):
         attention_output, _ = self.attention(inp_tensors)
 
         # add and project
-        x = self.linear(sage_output + attention_output)
+        x = self.linear(torch.concatenate([sage_output, attention_output], dim=-1))
 
         # activation and layer norm
         output = self.silu(x)

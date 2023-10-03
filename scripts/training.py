@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import click
+import numpy as np
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
@@ -58,6 +59,7 @@ import wandb
     help="The list size to use for the training (number of samples per graph in the batch)",
 )
 @click.option("--weight_decay", type=float, default=0.0, help="The weight decay to use for training")
+@click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps")
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -174,7 +176,12 @@ def train_tile_network(**kwargs):
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
-        pbar = tqdm(train_dataloader, postfix={"loss": 0})
+        total = (
+            len(train_dataloader)
+            if kwargs["max_train_steps"] is None
+            else np.minimum(kwargs["max_train_steps"], len(train_dataloader))
+        )
+        pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
@@ -195,6 +202,10 @@ def train_tile_network(**kwargs):
 
             # log the summaries
             wandb.log(summaries)
+
+            # break if necessary
+            if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"]:
+                break
 
         # save the network for this epoch
         logger.info("Saving the model")
