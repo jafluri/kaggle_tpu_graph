@@ -6,7 +6,7 @@ import click
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, BatchedMessagePassing
+from tpu_graph.networks import TPUGraphNetwork, GPSConv
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
@@ -43,6 +43,7 @@ import wandb
 @click.option("--epochs", type=int, default=1, help="The number of epochs to train")
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
 @click.option("--cache", is_flag=True, help="If set, the dataset is cached in memory")
+@click.option("--clear_cache", is_flag=True, help="If set, the cache is cleared before training")
 @click.option(
     "--layout_network",
     is_flag=True,
@@ -98,6 +99,7 @@ def train_tile_network(**kwargs):
     train_dataset = dataset_class(
         [base_path.joinpath("train") for base_path in base_paths],
         cache=kwargs["cache"],
+        clear_cache=kwargs["clear_cache"],
         list_size=kwargs["list_size"],
         list_shuffle=True,
     )
@@ -105,25 +107,31 @@ def train_tile_network(**kwargs):
 
     logger.info("Loading the dataset for validation")
     val_dataset = dataset_class(
-        [base_path.joinpath("valid") for base_path in base_paths], cache=kwargs["cache"], list_size=1
+        [base_path.joinpath("valid") for base_path in base_paths],
+        cache=kwargs["cache"],
+        list_size=1,
+        clear_cache=kwargs["clear_cache"],
     )
     val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     logger.info("Loading the dataset for testing")
     test_dataset = dataset_class(
-        [base_path.joinpath("test") for base_path in base_paths], cache=kwargs["cache"], list_size=1
+        [base_path.joinpath("test") for base_path in base_paths],
+        cache=kwargs["cache"],
+        list_size=1,
+        clear_cache=kwargs["clear_cache"],
     )
     test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
     input_dim = 159 if kwargs["layout_network"] else 165
-    # deal with the embedding
+    # the position embedding
+    input_dim += 16
+    # the op embedding
     input_dim += 31
 
-    message_network = nn.Sequential(
-        BatchedMessagePassing(input_dim, 128), BatchedMessagePassing(128, 128), BatchedMessagePassing(128, 128)
-    )
+    message_network = nn.Sequential(GPSConv(input_dim, 128), GPSConv(128, 128), GPSConv(128, 128))
     projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
@@ -166,8 +174,8 @@ def train_tile_network(**kwargs):
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
         pbar = tqdm(train_dataloader, postfix={"loss": 0})
-        for batch_idx, (features, lengths, runtimes, connection_matrix) in enumerate(pbar):
-            pred_runtimes = network(features, connection_matrix, lengths)
+        for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
+            pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
             summaries = {"loss": loss.item()}
 
@@ -198,7 +206,6 @@ def train_tile_network(**kwargs):
                 network,
                 val_dataloader,
                 save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
-                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"val_loss": avg_loss, "val_avg_kendall": avg_kendall}, commit=False)
@@ -210,7 +217,6 @@ def train_tile_network(**kwargs):
                 network,
                 test_dataloader,
                 save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
-                fast_eval=kwargs["fast_eval"],
             )
             # log everything
             wandb.log({"test_loss": avg_loss, "test_avg_kendall": avg_kendall})

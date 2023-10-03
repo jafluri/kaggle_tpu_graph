@@ -5,10 +5,11 @@ from pathlib import Path
 import numba as nb
 import numpy as np
 import torch
-from igraph import Graph
 from torch.utils.data import Dataset
+from torch_geometric.data import Data
+from torch_geometric.transforms import AddRandomWalkPE
+from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import MAX_OP_CODE
 from tqdm import tqdm
 
 
@@ -23,8 +24,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         list_size: int = 32,
         list_shuffle: bool = False,
         cache=False,
-        cutoff: int = 3,
-        clear_cache: bool = False,
+        cutoff: int = 16,
+        clear_cache: bool = True,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -42,6 +43,11 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.list_size = list_size
         self.list_shuffle = list_shuffle
         self.clear_cache = clear_cache
+
+        # create the encoder
+        self.encoder = AddRandomWalkPE(
+            self.cutoff,
+        )
 
         # get all the files
         if not isinstance(data_path, list):
@@ -86,39 +92,31 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         features = []
         times = []
         # for the connection matrices
-        row_indices = []
-        col_indices = []
+        edge_indices = []
         offset = 0
-        edge_codes = []
         # the individual length of the graphs
         lengths = []
 
         # unpack everything
         for t in tensors:
             assert len(t) == 3, "The length of the tensors must be 3"
-            node_feat, connection_matrix, config_runtime = t
-            row_ids, col_ids, e_codes = connection_matrix
+            node_feat, edge_index, config_runtime = t
 
             # append the tensors that need to go through the network
             features.append(node_feat)
             lengths.append(node_feat.shape[1])
             times.append(config_runtime)
-            row_indices.append(row_ids + offset)
-            col_indices.append(col_ids + offset)
+            edge_indices.append(edge_index + offset)
             offset += node_feat.shape[1]
-            edge_codes.append(e_codes)
 
         # stack the tensors
         features = torch.Tensor(np.concatenate(features, axis=1)).to(device)
         times = torch.tensor(np.stack(times, axis=0), dtype=dtype).to(device)
 
         # the connection matrix
-        row_indices = torch.tensor(np.concatenate(row_indices, axis=0), dtype=torch.long).to(device)
-        col_indices = torch.tensor(np.concatenate(col_indices, axis=0), dtype=torch.long).to(device)
-        edge_codes = torch.tensor(np.concatenate(edge_codes, axis=0), dtype=torch.long).to(device)
-        connection_matrix = (row_indices, col_indices, edge_codes)
+        edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long).to(device)
 
-        return features, lengths, times, connection_matrix
+        return features, lengths, times, edge_indices
 
     def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False, drop_last: bool = True):
         """
@@ -165,60 +163,26 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         return data, offset
 
-    def add_imaginary_output_node(self, node_feat: np.ndarray, edge_index: np.ndarray) -> np.ndarray:
+    def get_positional_encoding(self, n_nodes, edge_index):
         """
-        Adds an imaginary output node to the node features and edge index and converts the layout to iGraph
-        :param node_feat: The node features, used to find the output nodes
-        :param edge_index: The array containing the edge indices
-        :return: The new edges
-        """
-
-        # we add an imaginary node that connects all the output nodes
-        outputs = np.where(node_feat[:, 0] == 1)[0]
-        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
-        new_edges[:, 1] = outputs
-        new_edges[:, 0] = len(node_feat)
-        new_edges = np.concatenate([edge_index, new_edges], axis=0)
-
-        # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
-        new_edges = np.fliplr(new_edges).copy()
-
-        return new_edges
-
-    def get_graph_and_context_matrix(self, op_codes: np.ndarray, edge_index: np.ndarray):
-        """
-        Returns the graph and the connection matrix for the given node features and edge index
-        :param op_codes: The op codes for the nodes
+        Returns the positional encoding for the given graph
+        :param n_nodes: The number of nodes in the graph
         :param edge_index: The edge index
-        :return: The graph and the sparse context matrix (mixed)
+        :return: The positional encoding
         """
 
-        # create the graph, name it after the file name such that it has a unique name
-        graph = Graph(n=len(op_codes), edges=edge_index, directed=True)
-        graph["op_codes"] = op_codes
+        with torch.no_grad():
+            # create the graph (we need to add self loops and reverse edges)
+            edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
+            edge_index = torch.tensor(edge_index, dtype=torch.long)
+            edge_index = add_self_loops(edge_index, num_nodes=n_nodes)[0]
+            x = torch.ones((n_nodes, 1))
+            data = Data(x=x, edge_index=edge_index)
 
-        # get the connection matrix (CSR format) without the imaginary node
-        row_ids = []
-        col_ids = []
-        edge_codes = []
-        for vertex_id, neighborhood in enumerate(graph.neighborhood(order=self.cutoff, mode="in", mindist=0)[:-1]):
-            if len(neighborhood) == 0:
-                row_ids.append(row_ids[-1])
-                continue
-            row_ids.extend([vertex_id] * len(neighborhood))
-            col_ids.extend(neighborhood)
-            dists = np.array(graph.distances(source=vertex_id, target=neighborhood, mode="in")[0])
-            codes = graph["op_codes"][neighborhood] + dists * MAX_OP_CODE
-            edge_codes.append(codes)
+            # get the positional encoding
+            data = self.encoder(data)
 
-        # create the sparse connection matrix
-        connection_mat = (
-            np.array(row_ids, dtype=np.int32),
-            np.array(col_ids, dtype=np.int32),
-            np.concatenate(edge_codes),
-        )
-
-        return graph, connection_mat
+        return data.random_walk_pe.numpy()
 
     def read_data(self, data: dict[str : np.ndarray]):
         """
@@ -247,18 +211,14 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # we need to convert the data to a dict because of the caching
         data = {k: v for k, v in data.items()}
 
-        # read out the data for this graph
-        node_feat = data["node_feat"]
-        data["edge_index"] = self.add_imaginary_output_node(node_feat, data["edge_index"])
+        # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
+        data["edge_index"] = np.fliplr(data["edge_index"]).T.copy()
 
-        # get graph and connection matrix
-        graph, connection_matrix = self.get_graph_and_context_matrix(
-            op_codes=np.append(data["node_opcode"], [-1]), edge_index=data["edge_index"]
-        )
-        graph["name"] = filename
+        # get the number of nodes
+        n_nodes = data["node_feat"].shape[0]
 
-        # unpack the connection matrix and save in the data dict
-        data["row_indices"], data["col_indices"], data["edge_codes"] = connection_matrix
+        # the positional encoding
+        data["pe"] = self.get_positional_encoding(n_nodes, data["edge_index"])
 
         # the indices of the samples
         data["indices"] = np.arange(len(data["config_runtime"]))
@@ -335,7 +295,11 @@ class TileDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        connection_matrix = (data["row_indices"], data["col_indices"], data["edge_codes"])
+        pe = data["pe"]
+        edge_index = data["edge_index"]
+
+        # add node_feat and pe
+        node_feat = np.concatenate([node_feat, pe], axis=1)
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -350,7 +314,7 @@ class TileDataset(TPUGraphDataset):
         node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
         features = np.concatenate([node_opcode, node_feat[:], config_feat], axis=2)
 
-        return features, connection_matrix, config_runtime
+        return features, edge_index, config_runtime
 
 
 class LayoutDataset(TPUGraphDataset):

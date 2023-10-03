@@ -24,9 +24,9 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader):
     labels = []
     loss_vals = []
     with torch.no_grad():
-        for batch_idx, (features, lengths, runtimes, connection_matrix) in enumerate(pbar):
+        for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # eval the network
-            pred_runtimes = network(features, connection_matrix, lengths)
+            pred_runtimes = network(features, edge_index, lengths)
             predictions.append(pred_runtimes.cpu().detach().numpy())
             labels.append(runtimes.cpu().detach().numpy())
 
@@ -94,14 +94,12 @@ def evaluate_layout_network(
     network: TPUGraphNetwork,
     dataloader: DataLoader,
     save_path: str | bytes | os.PathLike = None,
-    fast_eval: bool = False,
 ):
     """
     Evaluates the layout network on the given dataloader
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
     :param save_path: The path where to save the predictions etc. (NPZ file)
-    :param fast_eval: If True, we calculate the longest path only once and use it for all iterations of the same graph
     :return: The average loss (log mse) and the average Kendall's Tau
     """
 
@@ -109,8 +107,7 @@ def evaluate_layout_network(
     dataset = dataloader.dataset
 
     # evaluate the network
-    p_update_path = 0.0 if fast_eval else 1.0
-    avg_loss, predictions, labels = evaluate_network(network, dataloader, p_update_path=p_update_path)
+    avg_loss, predictions, labels = evaluate_network(network, dataloader)
 
     # split the predictions and labels according to the files
     split_predictions = np.split(predictions, dataset.offsets[:-1])
