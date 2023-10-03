@@ -176,11 +176,9 @@ def train_tile_network(**kwargs):
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
-        total = (
-            len(train_dataloader)
-            if kwargs["max_train_steps"] is None
-            else np.minimum(kwargs["max_train_steps"], len(train_dataloader))
-        )
+        total = len(train_dataloader)
+        if kwargs["max_train_steps"] is not None:
+            total = np.minimum(kwargs["max_train_steps"], len(train_dataloader))
         pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             pred_runtimes = network(features, edge_index, lengths)
