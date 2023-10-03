@@ -229,7 +229,7 @@ class GPSConv(nn.Module):
         """
 
         # unpack the input tensors
-        _, connection_matrix = inp_tensors
+        x_orig, connection_matrix = inp_tensors
 
         # apply the layers
         sage_output, _ = self.sage_conv(inp_tensors)
@@ -239,7 +239,7 @@ class GPSConv(nn.Module):
         x = self.linear(torch.concatenate([sage_output, attention_output], dim=-1))
 
         # activation and layer norm
-        output = self.silu(x)
+        output = self.silu(x + x_orig)
         output = self.layernorm(output)
 
         # we output the connection matrix for the next layer
