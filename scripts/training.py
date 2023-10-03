@@ -57,6 +57,8 @@ import wandb
     default=16,
     help="The list size to use for the training (number of samples per graph in the batch)",
 )
+@click.option("--weight_decay", type=float, default=0.01, help="The weight decay to use for training")
+@click.option("--norm_penalty", type=float, default=1e-4, help="The norm penalty to use for training")
 def train_tile_network(**kwargs):
     # create a logger for the training
     logger = logging.getLogger("tile_network.train")
@@ -149,7 +151,7 @@ def train_tile_network(**kwargs):
     network = network.to("cuda")
 
     # get the optimizer
-    optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"])
+    optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
 
     # get the scheduler
     scheduler = None
@@ -178,6 +180,11 @@ def train_tile_network(**kwargs):
             pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
             summaries = {"loss": loss.item()}
+
+            # the norm penalty
+            norm_penalty = torch.norm(network.projection_network.weight, p=2)
+            summaries["norm_penalty"] = norm_penalty.item()
+            loss += kwargs["norm_penalty"] * norm_penalty
 
             # log the loss to the logger
             pbar.set_postfix({"loss": loss.item()})
