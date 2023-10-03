@@ -180,10 +180,14 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             x = torch.ones((n_nodes, 1))
             data = Data(x=x, edge_index=edge_index)
 
+            # to GPU if possible
+            if torch.cuda.is_available():
+                data = data.to("cuda")
+
             # get the positional encoding
             data = self.encoder(data)
 
-        return data.random_walk_pe.numpy()
+        return data.random_walk_pe.cpu().numpy()
 
     def read_data(self, data: dict[str : np.ndarray]):
         """
@@ -340,7 +344,11 @@ class LayoutDataset(TPUGraphDataset):
         # read out the data for this graph
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        connection_matrix = (data["row_indices"], data["col_indices"], data["edge_codes"])
+        pe = data["pe"]
+        edge_index = data["edge_index"]
+
+        # add node_feat and pe
+        node_feat = np.concatenate([node_feat, pe], axis=1)
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
@@ -358,4 +366,4 @@ class LayoutDataset(TPUGraphDataset):
         node_feat = np.tile(node_feat, (self.list_size, 1, 1))
         features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
 
-        return features, connection_matrix, config_runtime
+        return features, edge_index, config_runtime
