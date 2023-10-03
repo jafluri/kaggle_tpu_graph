@@ -124,7 +124,7 @@ class RetentiveAttention(nn.Module):
     """
 
     def __init__(
-        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 3, decay: float = 0.5
+        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 4, decay: float = 0.7
     ):
         """
         Inits the layer
@@ -217,9 +217,11 @@ class GPSConv(nn.Module):
         # init the layers
         self.sage_conv = SAGEConv(inp_dim, out_dim)
         self.attention = RetentiveAttention(inp_dim, out_dim)
-        self.linear = nn.Linear(2 * out_dim, out_dim)
+        self.linear1 = nn.Linear(2 * out_dim, out_dim)
+        self.linear2 = nn.Linear(out_dim, out_dim)
         self.silu = nn.SiLU()
-        self.layernorm = nn.LayerNorm(out_dim)
+        self.layernorm1 = nn.LayerNorm(out_dim)
+        self.layernorm2 = nn.LayerNorm(out_dim)
 
     def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
         """
@@ -236,11 +238,16 @@ class GPSConv(nn.Module):
         attention_output, _ = self.attention(inp_tensors)
 
         # add and project
-        x = self.linear(torch.concatenate([sage_output, attention_output], dim=-1))
+        x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
 
         # activation and layer norm
+        x = self.silu(x)
+        x = self.layernorm1(x)
+
+        # second layer with skip connection
+        x = self.linear2(x)
         output = self.silu(x + x_orig)
-        output = self.layernorm(output)
+        output = self.layernorm2(output)
 
         # we output the connection matrix for the next layer
         return output, connection_matrix

@@ -132,7 +132,7 @@ def train_tile_network(**kwargs):
     # the position embedding
     input_dim += 16
 
-    message_network = nn.Sequential(GPSConv(128, 128), GPSConv(128, 128), GPSConv(128, 128))
+    message_network = nn.Sequential(GPSConv(128, 128), GPSConv(128, 128))
     projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
