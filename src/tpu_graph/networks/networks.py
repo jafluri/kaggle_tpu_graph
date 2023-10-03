@@ -151,7 +151,7 @@ class RetentiveAttention(nn.Module):
         # the initial weights
         key = self.key_embedding(x)
         query = self.query_embedding(x)
-        weights = (key * query).sum(dim=-1, keepdim=True)
+        weights = (key * query).mean(dim=-1, keepdim=True)
 
         # get the input dimension
         list_dim, graph_dim, inp_dim = x.shape
@@ -171,7 +171,7 @@ class RetentiveAttention(nn.Module):
             x_reshape = current_x.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
             current_key = self.key_embedding(x_reshape)
             current_query = self.query_embedding(x_reshape)
-            current_weights = (current_key * current_query).sum(dim=-1, keepdim=True)
+            current_weights = (current_key * current_query).mean(dim=-1, keepdim=True)
             weights = weights + current_weights
             x_orig_shape = x_orig_shape + x_reshape
 

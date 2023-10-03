@@ -10,6 +10,7 @@ from torch_geometric.data import Data
 from torch_geometric.transforms import AddRandomWalkPE
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
+from tpu_graph.constants import PROD_FEATURES
 from tqdm import tqdm
 
 
@@ -210,6 +211,10 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # we need to convert the data to a dict because of the caching
         data = {k: v for k, v in data.items()}
+
+        # we log all the product features
+        node_feat = data["node_feat"]
+        node_feat[:, PROD_FEATURES] = np.log(node_feat[:, PROD_FEATURES] + 1)
 
         # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
         data["edge_index"] = np.fliplr(data["edge_index"]).T.copy()
