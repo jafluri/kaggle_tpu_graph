@@ -180,10 +180,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             x = torch.ones((n_nodes, 1))
             data = Data(x=x, edge_index=edge_index)
 
-            # to GPU if possible
-            if torch.cuda.is_available():
-                data = data.to("cuda")
-
             # get the positional encoding
             data = self.encoder(data)
 
