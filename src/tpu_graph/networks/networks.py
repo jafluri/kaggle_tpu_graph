@@ -282,8 +282,8 @@ class TPUGraphNetwork(nn.Module):
         # for the final global attention
         self.k_dim = key_dim
         self.k = nn.Linear(graph_embedding_dim, key_dim, bias=False)
-        self.q = nn.Linear(graph_embedding_dim, key_dim, bias=False)
         self.v = nn.Linear(graph_embedding_dim, value_dim, bias=False)
+        self.silu = nn.SiLU()
 
     def forward(
         self,
@@ -319,19 +319,10 @@ class TPUGraphNetwork(nn.Module):
 
         # to key, query, value
         key = self.k(graph_embedding)
-        query = self.q(graph_embedding)
         value = self.v(graph_embedding)
 
-        # the actual query is the mean of all queries
-        query = torch_scatter.scatter_mean(query, index=index, dim=1)
-
-        # the key * query is a bit annoying, we need to do it in a loop
-        weights = []
-        for q, k in zip(torch.split(query, 1, dim=1), torch.split(key, lengths, dim=1)):
-            w = (q * k).sum(dim=-1, keepdim=True) / np.sqrt(self.k_dim)
-            w = torch.nn.functional.softmax(w, dim=1)
-            weights.append(w)
-        weights = torch.cat(weights, dim=1)
+        # the weights are just the sum of the key
+        weights = self.silu(key.mean(dim=-1, keepdim=True))
 
         # now we can apply the weights
         graph_embedding = torch_scatter.scatter_sum(weights * value, index=index, dim=1)
