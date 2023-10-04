@@ -333,8 +333,8 @@ class LayoutDataset(TPUGraphDataset):
         # get data and offset
         data, offset = self.get_data_and_offset(idx)
 
-        # read out the data for this graph
-        node_feat = data["node_feat"]
+        # read out the data for this graph (we copy because a subset will be logged)
+        node_feat = data["node_feat"].copy()
         node_opcode = data["node_opcode"]
         pe = data["pe"]
         edge_index = data["edge_index"]
