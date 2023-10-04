@@ -51,7 +51,6 @@ import wandb
     help="If set, the layout network is trained, this changes the input dimension from 165 (tile network) "
     "to 159 (layout network)",
 )
-@click.option("--exp_pred", is_flag=True, help="If set, the prediction is taken as the exponential of the output")
 @click.option(
     "--list_size",
     type=int,
@@ -84,7 +83,6 @@ def train_tile_network(**kwargs):
             "batch_size": kwargs["batch_size"],
             "cosine_annealing": kwargs["cosine_annealing"],
             "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
-            "exp_pred": kwargs["exp_pred"],
             "list_size": kwargs["list_size"],
         },
     )
@@ -132,15 +130,15 @@ def train_tile_network(**kwargs):
     # the position embedding
     input_dim += 16
 
-    message_network = nn.Sequential(GPSConv(64, 64), GPSConv(64, 64), GPSConv(64, 64))
-    projection_network = nn.Linear(64, 1)
+    message_network = nn.Sequential(GPSConv(64, 64), GPSConv(64, 64))
+    projection_network = nn.Sequential(nn.Linear(128, 128), nn.SiLU(), nn.Linear(128, 1))
 
     network = TPUGraphNetwork(
         in_channels=input_dim,
         out_channels=64,
+        graph_embedding_dim=64,
         message_network=message_network,
         projection_network=projection_network,
-        exp=kwargs["exp_pred"],
     )
 
     # restore the model if necessary

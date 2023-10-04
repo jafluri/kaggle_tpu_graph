@@ -254,16 +254,19 @@ class TPUGraphNetwork(nn.Module):
         out_channels: int,
         message_network: nn.Sequential,
         projection_network: nn.Module,
+        graph_embedding_dim: int,
+        key_dim: int = 32,
+        value_dim: int = 128,
         op_embedding_dim: int = 32,
-        exp: bool = False,
         **kwargs,
     ):
         """
         Init the network
         :param in_channels: The number of input channels
-        :param out_channels: The number of output channels
+        :param out_channels: The number of output channels for the embedding layer
         :param message_network: A network that performs the message passing
         :param projection_network: A network that projects the output of the transformer network to the output dimension
+        :param graph_embedding_dim: The dimension of the graph embedding
         :param op_embedding_dim: The dimension of the op embedding
         :param kwargs: Additional arguments for the super class
         """
@@ -275,7 +278,12 @@ class TPUGraphNetwork(nn.Module):
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
-        self.exp = exp
+
+        # for the final global attention
+        self.k_dim = key_dim
+        self.k = nn.Linear(graph_embedding_dim, key_dim, bias=False)
+        self.q = nn.Linear(graph_embedding_dim, key_dim, bias=False)
+        self.v = nn.Linear(graph_embedding_dim, value_dim, bias=False)
 
     def forward(
         self,
@@ -308,13 +316,27 @@ class TPUGraphNetwork(nn.Module):
 
         # apply the transformer networks
         graph_embedding, _ = self.message_network((emb_features, connection_matrix))
+
+        # to key, query, value
+        key = self.k(graph_embedding)
+        query = self.q(graph_embedding)
+        value = self.v(graph_embedding)
+
+        # the actual query is the mean of all queries
+        query = torch_scatter.scatter_mean(query, index=index, dim=1)
+
+        # the key * query is a bit annoying, we need to do it in a loop
+        weights = []
+        for q, k in zip(torch.split(query, 1, dim=1), torch.split(key, lengths, dim=1)):
+            w = (q * k).sum(dim=-1, keepdim=True) / np.sqrt(self.k_dim)
+            w = torch.nn.functional.softmax(w, dim=1)
+            weights.append(w)
+        weights = torch.cat(weights, dim=1)
+
+        # now we can apply the weights
+        graph_embedding = torch_scatter.scatter_sum(weights * value, index=index, dim=1)
+
+        # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
-
-        # exp the output if necessary
-        if self.exp:
-            runtimes = torch.exp(runtimes)
-
-        # sum over the graphs
-        runtimes = torch_scatter.scatter_sum(runtimes, index=index, dim=1)
 
         return torch.squeeze(runtimes.transpose(0, 1))
