@@ -138,7 +138,6 @@ def train_tile_network(**kwargs):
         out_channels=128,
         graph_embedding_dim=32,
         message_network=message_network,
-        value_dim=32,
         projection_network=projection_network,
     )
 

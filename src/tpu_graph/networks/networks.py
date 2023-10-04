@@ -170,7 +170,7 @@ class RetentiveAttention(nn.Module):
         weights = (key * query).mean(dim=-1, keepdim=True)
 
         # now the recursive retention, weights are now (graph, list)
-        iter_weights = torch.squeeze(weights).T
+        iter_weights = torch.squeeze(weights, dim=-1).T
         for i in range(1, self.n_iterations):
             # apply the connection matrix with the decay (apply it directly to the weights because everything is linear)
             iter_weights = iter_weights * self.decay
