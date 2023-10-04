@@ -117,10 +117,17 @@ def evaluate_layout_network(
     kendalls = []
     rankings = []
     for p, l in zip(split_predictions, split_labels):
+        # create the rankings
         p_argsort = np.argsort(p)
         l_argsort = np.argsort(l)
-        rankings.append(p_argsort)
-        kendalls.append(kendalltau(p_argsort, l_argsort).correlation)
+        p_rank = np.empty_like(p_argsort)
+        p_rank[p_argsort] = np.arange(len(p_argsort))
+        l_rank = np.empty_like(l_argsort)
+        l_rank[l_argsort] = np.arange(len(l_argsort))
+        rankings.append(p_rank)
+
+        # evaluate the Kendall's Tau
+        kendalls.append(kendalltau(l_rank, p_rank).correlation)
 
     # get the average Kendall's Tau
     avg_kendall = np.mean(kendalls)
