@@ -166,32 +166,20 @@ class RetentiveAttention(nn.Module):
         # the initial weights
         key = self.key_embedding(x)
         query = self.query_embedding(x)
+        values = self.value_embedding(x)
         weights = (key * query).mean(dim=-1, keepdim=True)
 
-        # get the input dimension
-        list_dim, graph_dim, inp_dim = x.shape
-
-        # (list, graph, inp) -> (graph, inp * list)
-        x_orig_shape = x
-        x = x.transpose(0, 1).reshape(graph_dim, -1)
-
-        # now we get the recursive retention
-        current_x = x
+        # now the recursive retention, weights are now (graph, list)
+        iter_weights = torch.squeeze(weights).T
         for i in range(1, self.n_iterations):
-            # apply the connection matrix with the decay
-            current_x = current_x * self.decay
-            current_x = torch.sparse.mm(connection_matrix, current_x)
+            # apply the connection matrix with the decay (apply it directly to the weights because everything is linear)
+            iter_weights = iter_weights * self.decay
+            iter_weights = torch.sparse.mm(connection_matrix, iter_weights)
 
             # reshape and add to weights
-            x_reshape = current_x.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
-            current_key = self.key_embedding(x_reshape)
-            current_query = self.query_embedding(x_reshape)
-            current_weights = (current_key * current_query).mean(dim=-1, keepdim=True)
-            weights = weights + current_weights
-            x_orig_shape = x_orig_shape + x_reshape
+            weights = weights + iter_weights.T.unsqueeze(-1)
 
         # apply the values
-        values = self.value_embedding(x_orig_shape)
         output = self.layernorm(values * weights)
 
         return output, connection_matrix
