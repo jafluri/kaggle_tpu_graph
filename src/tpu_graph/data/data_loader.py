@@ -67,9 +67,18 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.size_list = []
         self.cache = cache
         self.data_dict = {}
+        self.index_dict = {}
         for f in tqdm(self.file_list):
             with np.load(f) as data:
-                self.size_list.append(len(data["config_runtime"]) // self.list_size)
+                size = len(data["config_runtime"]) // self.list_size
+                self.size_list.append(size)
+
+                # for the indices (which will be combined in the lists)
+                self.index_dict[f] = (
+                    self.gen_index_list(size * self.list_size, len(data["config_runtime"])),
+                    len(data["config_runtime"]),
+                )
+
                 # read out all the data if we want to cache
                 if self.cache:
                     # read out the data
@@ -78,6 +87,45 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.length = sum(self.size_list)
         self.offsets = np.cumsum(self.size_list)
         logger.info(f"The dataset has a total size of {self.length}")
+
+    def gen_index_list(self, size, max_element):
+        """
+        Create a list of indices for the dataset this can be used to combine elements into lists for the batching
+        :param size: The size of the list
+        :param max_element: The maximum element in the list
+        :return: The list
+        """
+
+        # create the list
+        index_list = np.arange(max_element)
+        if self.list_shuffle:
+            np.random.shuffle(index_list)
+        index_list = index_list[:size]
+
+        return list(index_list)
+
+    def consume_list(self, file_name):
+        """
+        Consume a number of elements from a list or generates a new one if empty
+        :param file_name: The file name of the list
+        :return: The elements that are consumed and the list
+        """
+
+        # get the list and the max length
+        index_list, max_length = self.index_dict[file_name]
+
+        if len(index_list) < self.list_size:
+            # we need to generate a new list
+            index_list = self.gen_index_list(max_length // self.list_size * self.list_size, max_length)
+
+        # consume the elements
+        indices = index_list[: self.list_size]
+        index_list = index_list[self.list_size :]
+
+        # save the list
+        self.index_dict[file_name] = (index_list, max_length)
+
+        return indices
 
     @staticmethod
     def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32, device="cuda"):
@@ -138,31 +186,28 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             drop_last=drop_last,
         )
 
-    def get_data_and_offset(self, idx):
+    def get_data_and_indices(self, idx):
         """
-        Given an index to fetch a sample, returns the data of the right file and the offset (index of the sample in the
-        file)
+        Given an index to fetch a sample, returns the data of the right file and the indices to read out
         :param idx: Index to fetch the sample
-        :return: The data and the offset
+        :return: The data and the file name
         """
 
         # get the file
         file_idx = np.searchsorted(self.offsets, idx, side="right")
 
-        # get the offset
-        if file_idx == 0:
-            offset = idx
-        else:
-            offset = idx - self.offsets[file_idx - 1]
+        # get the indices
+        fname = self.file_list[file_idx]
+        indices = self.consume_list(fname)
 
         # load the file
         if self.cache:
-            data = self.data_dict[self.file_list[file_idx]]
+            data = self.data_dict[fname]
         else:
-            with np.load(self.file_list[file_idx]) as data:
+            with np.load(fname) as data:
                 data = self.read_data(data)
 
-        return data, offset
+        return data, indices
 
     def get_positional_encoding(self, n_nodes, edge_index):
         """
@@ -290,8 +335,8 @@ class TileDataset(TPUGraphDataset):
         :return: The sample
         """
 
-        # get data and offset
-        data, offset = self.get_data_and_offset(idx)
+        # get data and indices
+        data, indices = self.get_data_and_indices(idx)
 
         # read out the data for this graph
         node_feat = data["node_feat"]
@@ -302,9 +347,8 @@ class TileDataset(TPUGraphDataset):
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)
 
-        # read out the specific config
-        indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
-        config_feat = data["config_feat"][indices]
+        # we divide by 5 to normalize the config features
+        config_feat = data["config_feat"][indices] / 5.0
 
         # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
         config_runtime = data["config_runtime"][indices] / data["config_runtime_normalizers"][indices]
@@ -330,8 +374,8 @@ class LayoutDataset(TPUGraphDataset):
         :return: The sample
         """
 
-        # get data and offset
-        data, offset = self.get_data_and_offset(idx)
+        # get data and indices
+        data, indices = self.get_data_and_indices(idx)
 
         # read out the data for this graph (we copy because a subset will be logged)
         node_feat = data["node_feat"].copy()
@@ -344,9 +388,6 @@ class LayoutDataset(TPUGraphDataset):
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)
-
-        # read out the specific config
-        indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0
