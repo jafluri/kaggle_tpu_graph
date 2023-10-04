@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConv
+from tpu_graph.networks import TPUGraphNetwork, GPSConv
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
@@ -132,12 +132,12 @@ def train_tile_network(**kwargs):
     # the position embedding
     input_dim += 16
 
-    message_network = nn.Sequential(SAGEConv(128, 128), SAGEConv(128, 128), SAGEConv(128, 128))
-    projection_network = nn.Linear(128, 1)
+    message_network = nn.Sequential(GPSConv(64, 64), GPSConv(64, 64), GPSConv(64, 64))
+    projection_network = nn.Linear(64, 1)
 
     network = TPUGraphNetwork(
         in_channels=input_dim,
-        out_channels=128,
+        out_channels=64,
         message_network=message_network,
         projection_network=projection_network,
         exp=kwargs["exp_pred"],
