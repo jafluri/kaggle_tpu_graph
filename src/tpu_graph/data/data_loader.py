@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import PROD_FEATURES
+from tpu_graph.constants import LOG_FEATURES
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
@@ -212,10 +212,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # we need to convert the data to a dict because of the caching
         data = {k: v for k, v in data.items()}
 
-        # we log all the product features
-        node_feat = data["node_feat"]
-        node_feat[:, PROD_FEATURES] = np.log(node_feat[:, PROD_FEATURES] + 1)
-
         # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
         data["edge_index"] = np.fliplr(data["edge_index"]).T.copy()
 
@@ -343,12 +339,17 @@ class LayoutDataset(TPUGraphDataset):
         pe = data["pe"]
         edge_index = data["edge_index"]
 
+        # log some of the features
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
+
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)
 
         # read out the specific config
         indices = data["indices"][offset * self.list_size : (offset + 1) * self.list_size]
-        config_feat = data["node_config_feat"][indices]
+
+        # we divide by 5 to normalize the config features
+        config_feat = data["node_config_feat"][indices] / 5.0
         node_config_ids = data["node_config_ids"]
 
         # fill the config features

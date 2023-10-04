@@ -256,7 +256,6 @@ class TPUGraphNetwork(nn.Module):
         projection_network: nn.Module,
         graph_embedding_dim: int,
         key_dim: int = 32,
-        value_dim: int = 128,
         op_embedding_dim: int = 32,
         **kwargs,
     ):
@@ -281,8 +280,7 @@ class TPUGraphNetwork(nn.Module):
 
         # for the final global attention
         self.k_dim = key_dim
-        self.k = nn.Linear(graph_embedding_dim, key_dim, bias=False)
-        self.v = nn.Linear(graph_embedding_dim, value_dim, bias=False)
+        self.k = nn.Linear(graph_embedding_dim, 1, bias=False)
         self.silu = nn.SiLU()
 
     def forward(
@@ -319,13 +317,12 @@ class TPUGraphNetwork(nn.Module):
 
         # to key, query, value
         key = self.k(graph_embedding)
-        value = self.v(graph_embedding)
 
         # the weights are just the sum of the key
-        weights = self.silu(key.mean(dim=-1, keepdim=True))
+        weights = self.silu(key)
 
         # now we can apply the weights
-        graph_embedding = torch_scatter.scatter_sum(weights * value, index=index, dim=1)
+        graph_embedding = torch_scatter.scatter_sum(weights * graph_embedding, index=index, dim=1)
 
         # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
