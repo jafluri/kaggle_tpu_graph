@@ -126,7 +126,7 @@ class RetentiveAttention(nn.Module):
     """
 
     def __init__(
-        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 4, decay: float = 0.7
+        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 3, decay: float = 0.7
     ):
         """
         Inits the layer
