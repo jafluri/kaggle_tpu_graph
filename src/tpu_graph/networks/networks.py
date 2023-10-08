@@ -169,15 +169,19 @@ class RetentiveAttention(nn.Module):
         values = self.value_embedding(x)
         weights = (key * query).mean(dim=-1, keepdim=True)
 
+        # prep the matrix
+        with torch.no_grad():
+            ret_connection_matrix = connection_matrix * self.decay
+            for i in range(1, self.n_iterations):
+                ret_connection_matrix += torch.sparse.mm(ret_connection_matrix, connection_matrix)
+
         # now the recursive retention, weights are now (graph, list)
         iter_weights = torch.squeeze(weights, dim=-1).T
-        for i in range(1, self.n_iterations):
-            # apply the connection matrix with the decay (apply it directly to the weights because everything is linear)
-            iter_weights = iter_weights * self.decay
-            iter_weights = torch.sparse.mm(connection_matrix, iter_weights)
+        # apply the connection matrix with the decay (apply it directly to the weights because everything is linear)
+        iter_weights = torch.sparse.mm(ret_connection_matrix, iter_weights)
 
-            # reshape and add to weights
-            weights = weights + iter_weights.T.unsqueeze(-1)
+        # reshape and add to weights
+        weights = weights + iter_weights.T.unsqueeze(-1)
 
         # apply the values
         output = self.layernorm(values * weights)
