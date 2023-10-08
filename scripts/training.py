@@ -257,6 +257,11 @@ def train_tile_network(**kwargs):
             wandb.log({"test_loss": avg_loss, "test_avg_slowdown": avg_slowdown})
             logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
 
+        # reshuffle the dataset
+        logger.info("Reshuffling the dataset")
+        train_dataset.reshuffle_indices()
+        train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
+
     # save the model
     logger.info("Saving the model")
     torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))

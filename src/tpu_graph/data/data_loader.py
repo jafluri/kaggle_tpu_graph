@@ -74,10 +74,10 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
                 self.size_list.append(size)
 
                 # for the indices (which will be combined in the lists)
-                self.index_dict[f] = (
-                    self.gen_index_list(size * self.list_size, len(data["config_runtime"])),
-                    len(data["config_runtime"]),
-                )
+                indices = np.arange(len(data["config_runtime"]))
+                if self.list_shuffle:
+                    np.random.shuffle(indices)
+                self.index_dict[f] = indices
 
                 # read out all the data if we want to cache
                 if self.cache:
@@ -88,44 +88,13 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         self.offsets = np.cumsum(self.size_list)
         logger.info(f"The dataset has a total size of {self.length}")
 
-    def gen_index_list(self, size, max_element):
+    def reshuffle_indices(self):
         """
-        Create a list of indices for the dataset this can be used to combine elements into lists for the batching
-        :param size: The size of the list
-        :param max_element: The maximum element in the list
-        :return: The list
+        Reshuffles the indices of the dataset to create new possible list sets
         """
 
-        # create the list
-        index_list = np.arange(max_element)
-        if self.list_shuffle:
-            np.random.shuffle(index_list)
-        index_list = index_list[:size]
-
-        return list(index_list)
-
-    def consume_list(self, file_name):
-        """
-        Consume a number of elements from a list or generates a new one if empty
-        :param file_name: The file name of the list
-        :return: The elements that are consumed and the list
-        """
-
-        # get the list and the max length
-        index_list, max_length = self.index_dict[file_name]
-
-        if len(index_list) < self.list_size:
-            # we need to generate a new list
-            index_list = self.gen_index_list(max_length // self.list_size * self.list_size, max_length)
-
-        # consume the elements
-        indices = index_list[: self.list_size]
-        index_list = index_list[self.list_size :]
-
-        # save the list
-        self.index_dict[file_name] = (index_list, max_length)
-
-        return indices
+        for v in self.index_dict.values():
+            np.random.shuffle(v)
 
     @staticmethod
     def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
@@ -204,9 +173,15 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get the file
         file_idx = np.searchsorted(self.offsets, idx, side="right")
 
+        # get the offset
+        if file_idx == 0:
+            offset = idx
+        else:
+            offset = idx - self.offsets[file_idx - 1]
+
         # get the indices
         fname = self.file_list[file_idx]
-        indices = self.consume_list(fname)
+        indices = self.index_dict[fname][offset * self.list_size : (offset + 1) * self.list_size]
 
         # load the file
         if self.cache:
