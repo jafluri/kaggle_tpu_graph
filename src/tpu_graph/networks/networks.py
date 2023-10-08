@@ -174,6 +174,7 @@ class RetentiveAttention(nn.Module):
             ret_connection_matrix = connection_matrix * self.decay
             for i in range(1, self.n_iterations):
                 ret_connection_matrix += torch.sparse.mm(ret_connection_matrix, connection_matrix)
+            ret_connection_matrix = ret_connection_matrix.coalesce()
 
         # now the recursive retention, weights are now (graph, list)
         iter_weights = torch.squeeze(weights, dim=-1).T
