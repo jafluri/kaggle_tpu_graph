@@ -141,7 +141,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         shuffle: bool = True,
         pin_memory: bool = True,
         drop_last: bool = True,
-        num_workers: int = 8,
+        num_workers: int = 4,
     ):
         """
         Returns a dataloader for the dataset
