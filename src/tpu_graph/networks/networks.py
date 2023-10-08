@@ -308,6 +308,8 @@ class TPUGraphNetwork(nn.Module):
         # build the connection matrix
         with torch.no_grad():
             n_nodes = features.shape[1]
+            # add the the other direction
+            edge_index = torch.cat([edge_index, torch.flip(edge_index, dims=(0,))], dim=-1)
             values = torch.ones(edge_index.shape[1]).to(edge_index.device)
             norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
             norm = norm.clamp(min=1.0)[edge_index[0]]
