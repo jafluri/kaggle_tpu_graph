@@ -10,11 +10,12 @@ from . import losses
 from ..networks.networks import TPUGraphNetwork
 
 
-def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader):
+def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, device="cuda"):
     """
     Evaluates the network and returns the average loss, prediction and labels
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
+    :param device: The device to use
     :return: The average loss, predictions and labels
     """
 
@@ -26,9 +27,9 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader):
     with torch.no_grad():
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to device
-            features = features.to(network.device)
-            runtimes = runtimes.to(network.device)
-            edge_index = edge_index.to(network.device)
+            features = features.to(device)
+            runtimes = runtimes.to(device)
+            edge_index = edge_index.to(device)
 
             # eval the network
             pred_runtimes = network(features, edge_index, lengths)
