@@ -128,12 +128,11 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         return indices
 
     @staticmethod
-    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32, device="cuda"):
+    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
         """
         A custom collate function for the tiles dataset
         :param tensors: A list of tuples that are returned by the dataset
         :param dtype: The dtype to use for the tensors
-        :param device: The device to put the tensors on, note the edges and graphs are always on the CPU
         :return: The collated output for the dataloader
         """
 
@@ -159,21 +158,29 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             offset += node_feat.shape[1]
 
         # stack the tensors
-        features = torch.Tensor(np.concatenate(features, axis=1)).to(device)
-        times = torch.tensor(np.stack(times, axis=0), dtype=dtype).to(device)
+        features = torch.Tensor(np.concatenate(features, axis=1))
+        times = torch.tensor(np.stack(times, axis=0), dtype=dtype)
 
         # the connection matrix
-        edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long).to(device)
+        edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long)
 
         return features, lengths, times, edge_indices
 
-    def get_dataloader(self, batch_size: int, shuffle: bool = True, pin_memory: bool = False, drop_last: bool = True):
+    def get_dataloader(
+        self,
+        batch_size: int,
+        shuffle: bool = True,
+        pin_memory: bool = True,
+        drop_last: bool = True,
+        num_workers: int = 8,
+    ):
         """
         Returns a dataloader for the dataset
         :param batch_size: The batch size to use
         :param shuffle: If True, the dataset is shuffled
         :param pin_memory: If True, the memory is pinned
         :param drop_last: If True, the last batch is dropped if it is not full
+        :param num_workers: The number of workers to use
         :return: The dataloader
         """
 
@@ -184,6 +191,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
             pin_memory=pin_memory,
             collate_fn=self.collate_fn_tiles,
             drop_last=drop_last,
+            num_workers=num_workers,
         )
 
     def get_data_and_indices(self, idx):

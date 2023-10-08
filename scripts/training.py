@@ -179,6 +179,12 @@ def train_tile_network(**kwargs):
             total = np.minimum(kwargs["max_train_steps"], len(train_dataloader))
         pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
+            # to GPU
+            features = features.to("cuda")
+            runtimes = runtimes.to("cuda")
+            edge_index = edge_index.to("cuda")
+
+            # predict the runtimes
             pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
             summaries = {"loss": loss.item()}

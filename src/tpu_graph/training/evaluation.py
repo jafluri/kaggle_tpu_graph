@@ -25,6 +25,11 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader):
     loss_vals = []
     with torch.no_grad():
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
+            # to device
+            features = features.to(network.device)
+            runtimes = runtimes.to(network.device)
+            edge_index = edge_index.to(network.device)
+
             # eval the network
             pred_runtimes = network(features, edge_index, lengths)
             predictions.append(pred_runtimes.cpu().detach().numpy())
