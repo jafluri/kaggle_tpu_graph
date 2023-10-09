@@ -126,7 +126,7 @@ class RetentiveAttention(nn.Module):
     """
 
     def __init__(
-        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 3, decay: float = 0.7
+        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 3, decay: float = 0.5
     ):
         """
         Inits the layer
@@ -259,8 +259,6 @@ class TPUGraphNetwork(nn.Module):
         out_channels: int,
         message_network: nn.Sequential,
         projection_network: nn.Module,
-        graph_embedding_dim: int,
-        key_dim: int = 32,
         op_embedding_dim: int = 32,
         **kwargs,
     ):
@@ -270,7 +268,6 @@ class TPUGraphNetwork(nn.Module):
         :param out_channels: The number of output channels for the embedding layer
         :param message_network: A network that performs the message passing
         :param projection_network: A network that projects the output of the transformer network to the output dimension
-        :param graph_embedding_dim: The dimension of the graph embedding
         :param op_embedding_dim: The dimension of the op embedding
         :param kwargs: Additional arguments for the super class
         """
@@ -282,11 +279,6 @@ class TPUGraphNetwork(nn.Module):
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
-
-        # for the final global attention
-        self.k_dim = key_dim
-        self.k = nn.Linear(graph_embedding_dim, 1, bias=False)
-        self.silu = nn.SiLU()
 
     def forward(
         self,
@@ -322,14 +314,8 @@ class TPUGraphNetwork(nn.Module):
         # apply the transformer networks
         graph_embedding, _ = self.message_network((emb_features, connection_matrix))
 
-        # to key, query, value
-        key = self.k(graph_embedding)
-
-        # the weights are just the sum of the key
-        weights = self.silu(key)
-
         # now we can apply the weights
-        graph_embedding = torch_scatter.scatter_sum(weights * graph_embedding, index=index, dim=1)
+        graph_embedding = torch_scatter.scatter_sum(graph_embedding, index=index, dim=1)
 
         # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
