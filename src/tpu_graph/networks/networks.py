@@ -325,7 +325,7 @@ class TPUGraphNetwork(nn.Module):
         """
 
         # create and index for the scatter sum
-        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to("cuda")
+        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to(features.device)
 
         # build the connection matrix
         with torch.no_grad():

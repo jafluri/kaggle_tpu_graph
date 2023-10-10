@@ -149,8 +149,11 @@ def train_network(rank, kwargs):
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
-        logger.info(f"Starting epoch {epoch}")
-        pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
+        if rank == 0:
+            logger.info(f"Starting epoch {epoch}")
+            pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
+        else:
+            pbar = train_dataloader
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to GPU
             features = features.to(rank)
@@ -163,7 +166,8 @@ def train_network(rank, kwargs):
             summaries = {"loss": loss.item()}
 
             # log the loss to the logger
-            pbar.set_postfix({"loss": loss.item()})
+            if rank == 0:
+                pbar.set_postfix({"loss": loss.item()})
 
             # backprop
             optimizer.zero_grad()
