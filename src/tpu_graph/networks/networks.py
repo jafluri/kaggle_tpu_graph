@@ -213,7 +213,7 @@ class RetentiveAttention(nn.Module):
         values = self.layernorm(values)
 
         # reshape back to (list, graph, out)
-        output = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
+        output = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1) + x
 
         return output, connection_matrix
 
