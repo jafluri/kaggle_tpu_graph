@@ -40,7 +40,7 @@ def cleanup():
 
 def train_network(rank, kwargs):
     # create a logger for the training
-    logger = logging.getLogger(f"tile_network.train.rank_{rank}")
+    logger = logging.getLogger(f"tpu_network.train.rank_{rank}")
     log_formatter = logging.Formatter(
         fmt="%(asctime)s %(name)10s %(levelname).3s   %(message)s ", datefmt="%y-%m-%d %H:%M:%S", style="%"
     )
@@ -49,7 +49,10 @@ def train_network(rank, kwargs):
     logger.addHandler(stream_handler)
     logger.propagate = False
     logger.setLevel(logging.INFO)
+
+    # setup the distributed training
     logger.info("Starting training of the tile network")
+    setup(rank, kwargs["world_size"])
 
     # load the dataset
     base_paths = [Path(p) for p in kwargs["data_path"]]
@@ -284,7 +287,7 @@ def train_network(rank, kwargs):
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
 def main(**kwargs):
     # create a logger for the training
-    logger = logging.getLogger("tile_network.train.main")
+    logger = logging.getLogger("tpu_network.train.main")
     log_formatter = logging.Formatter(
         fmt="%(asctime)s %(name)10s %(levelname).3s   %(message)s ", datefmt="%y-%m-%d %H:%M:%S", style="%"
     )
@@ -299,6 +302,7 @@ def main(**kwargs):
     # Start with the wandb init
     logger.info("Starting wandb")
     wandb.init(
+        mode="disabled",
         project="TPU Graph",
         config={
             "learning_rate": kwargs["learning_rate"],
