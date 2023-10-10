@@ -154,7 +154,7 @@ class RetentiveAttention(nn.Module):
         self.n_iterations = n_iterations
 
         if decay is None:
-            decay = np.linspace(0.01, 0.8, 8)
+            decay = np.linspace(0.0, 0.75, 4)
         self.decay = decay
 
         # the linear layers
@@ -213,7 +213,7 @@ class RetentiveAttention(nn.Module):
         values = self.layernorm(values)
 
         # reshape back to (list, graph, out)
-        output = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1) + x
+        output = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
 
         return output, connection_matrix
 
