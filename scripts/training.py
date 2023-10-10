@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch import optim, nn
 from tpu_graph.data import TileDataset, LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConv  # RetentiveAttention
+from tpu_graph.networks import TPUGraphNetwork, SAGEConv, RetentiveAttention
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
@@ -75,7 +75,6 @@ def train_tile_network(**kwargs):
     # Start with the wandb init
     logger.info("Starting wandb")
     wandb.init(
-        mode="offline",
         project="TPU Graph",
         config={
             "learning_rate": kwargs["learning_rate"],
@@ -135,9 +134,7 @@ def train_tile_network(**kwargs):
     #     SAGEConv(256, 128), SAGEConv(128, 128), SAGEConv(128, 128), RetentiveAttention(128, 128)
     # )
     message_network = nn.Sequential(
-        SAGEConv(256, 128),
-        SAGEConv(128, 128),
-        SAGEConv(128, 128),
+        SAGEConv(256, 128), SAGEConv(128, 128), SAGEConv(128, 128), RetentiveAttention(128, 128)
     )
     projection_network = nn.Linear(128, 1)
 
