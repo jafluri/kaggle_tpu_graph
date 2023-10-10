@@ -154,7 +154,7 @@ class RetentiveAttention(nn.Module):
         self.n_iterations = n_iterations
 
         if decay is None:
-            decay = np.linspace(0.0, 0.75, 4)
+            decay = np.linspace(0.0, 0.5, 2)
         self.decay = decay
 
         # the linear layers
