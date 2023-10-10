@@ -58,7 +58,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")]
+            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:2]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
