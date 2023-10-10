@@ -175,7 +175,7 @@ def train_network(rank, kwargs):
             # log the loss to the logger
             if rank == 0:
                 # get the total loss
-                total_loss = dist.all_reduce(loss, op=dist.ReduceOp.SUM, async_op=True) / kwargs["world_size"]
+                total_loss = dist.all_reduce(loss, op=dist.ReduceOp.SUM, async_op=False) / kwargs["world_size"]
 
                 # set postfix
                 pbar.set_postfix({"loss": total_loss.item()})
