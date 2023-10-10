@@ -154,14 +154,14 @@ class RetentiveAttention(nn.Module):
         self.n_iterations = n_iterations
 
         if decay is None:
-            decay = np.linspace(0.01, 0.5, 8)
+            decay = np.linspace(0.01, 0.8, 8)
         self.decay = decay
 
         # the linear layers
         self.key_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
         self.query_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
         self.value_embedding = nn.Linear(in_channels, out_channels, bias=False)
-        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels // len(decay))
 
     def forward(self, inp_tensors: tuple[torch.Tensor, torch.Tensor]):
         """
@@ -209,11 +209,11 @@ class RetentiveAttention(nn.Module):
         # apply the weights
         values = values * weights[..., None]
 
-        # reshape back to (list, graph, out)
-        values = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
+        # apply normalization
+        values = self.layernorm(values)
 
-        # apply the values
-        output = self.silu(values)
+        # reshape back to (list, graph, out)
+        output = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
 
         return output, connection_matrix
 
