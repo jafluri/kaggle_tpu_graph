@@ -158,10 +158,15 @@ def train_tile_network(**kwargs):
     # get the optimizer
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
 
+    # get the total number of batches per epoch
+    total = len(train_dataloader)
+    if kwargs["max_train_steps"] is not None:
+        total = np.minimum(kwargs["max_train_steps"], len(train_dataloader))
+
     # get the scheduler
     scheduler = None
     if kwargs["cosine_annealing"]:
-        t_max = len(train_dataloader) * kwargs["epochs"]
+        t_max = total * kwargs["epochs"]
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, t_max, eta_min=1e-6)
 
     # create the saving path
@@ -180,9 +185,6 @@ def train_tile_network(**kwargs):
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
         logger.info(f"Starting epoch {epoch}")
-        total = len(train_dataloader)
-        if kwargs["max_train_steps"] is not None:
-            total = np.minimum(kwargs["max_train_steps"], len(train_dataloader))
         pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to GPU
