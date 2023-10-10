@@ -1,22 +1,21 @@
 import logging
+import os
 import sys
 from pathlib import Path
 
 import click
 import numpy as np
 import torch
-from torch import optim, nn
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-
-from tpu_graph.data import TileDataset, LayoutDataset
+from tpu_graph.data import LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, SAGEConv, GPSConv
 
 # from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
-import os
 
 import wandb
 
@@ -67,7 +66,7 @@ def train_network(rank, kwargs):
                 "epochs": kwargs["epochs"],
                 "batch_size": kwargs["batch_size"],
                 "cosine_annealing": kwargs["cosine_annealing"],
-                "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
+                "network_type": "Layout Network",
                 "list_size": kwargs["list_size"],
             },
         )
@@ -78,16 +77,15 @@ def train_network(rank, kwargs):
     # load the dataset
     base_paths = [Path(p) for p in kwargs["data_path"]]
 
-    # get the dataset class
-    dataset_class = LayoutDataset if kwargs["layout_network"] else TileDataset
-
     logger.info("Loading the dataset for training")
-    train_dataset = dataset_class(
+    train_dataset = LayoutDataset(
         [base_path.joinpath("train") for base_path in base_paths],
         cache=kwargs["cache"],
         clear_cache=kwargs["clear_cache"],
         list_size=kwargs["list_size"],
         list_shuffle=True,
+        num_shards=kwargs["world_size"],
+        shard_id=rank,
     )
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
@@ -111,7 +109,7 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 if kwargs["layout_network"] else 165
+    input_dim = 159
     # the position embedding
     input_dim += 16
 
@@ -300,12 +298,6 @@ def train_network(rank, kwargs):
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
 @click.option("--cache", is_flag=True, help="If set, the dataset is cached in memory")
 @click.option("--clear_cache", is_flag=True, help="If set, the cache is cleared before training")
-@click.option(
-    "--layout_network",
-    is_flag=True,
-    help="If set, the layout network is trained, this changes the input dimension from 165 (tile network) "
-    "to 159 (layout network)",
-)
 @click.option(
     "--list_size",
     type=int,

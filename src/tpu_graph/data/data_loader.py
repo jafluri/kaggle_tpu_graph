@@ -27,6 +27,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         cache=False,
         cutoff: int = 16,
         clear_cache: bool = True,
+        num_shards: int = 1,
+        shard: int = 0,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -37,6 +39,8 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         :param cutoff: The cutoff for the neighborhood in the connection matrix
         :param decay: The decay for the neighborhood in the connection matrix
         :param clear_cache: If True, the cache is cleared, meaning the preprocessed data is ignored
+        :param num_shards: The number of shards to use
+        :param shard: The shard to use
         """
 
         # save the attributes
@@ -58,7 +62,9 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:2]
+            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:7]
+            # now we split the files into shards
+            file_list = list(np.array_split(file_list, num_shards)[shard])
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
