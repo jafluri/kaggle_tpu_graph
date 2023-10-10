@@ -5,4 +5,5 @@ wandb/
 logs/
 
 # saved models
+slurm_out/
 models/
