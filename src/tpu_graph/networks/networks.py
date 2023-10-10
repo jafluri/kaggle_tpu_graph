@@ -161,7 +161,7 @@ class RetentiveAttention(nn.Module):
         self.key_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
         self.query_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
         self.value_embedding = nn.Linear(in_channels, out_channels, bias=False)
-        self.layernorm = nn.LayerNorm(out_channels)
+        self.silu = nn.SiLU()
 
     def forward(self, inp_tensors: tuple[torch.Tensor, torch.Tensor]):
         """
@@ -213,7 +213,7 @@ class RetentiveAttention(nn.Module):
         values = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
 
         # apply the values
-        output = self.layernorm(values)
+        output = self.silu(values)
 
         return output, connection_matrix
 
