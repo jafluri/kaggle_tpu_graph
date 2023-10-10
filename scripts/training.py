@@ -140,8 +140,7 @@ def train_network(rank, kwargs):
 
     # create the loss fn
     loss_class = PairwiseDCGHingeLoss()
-
-    batch_pad = torch.ones(kwargs["batch_size"]).long().to("cuda") * train_dataset.list_size
+    batch_pad = torch.ones(kwargs["batch_size"]).long().to(rank) * train_dataset.list_size
 
     def loss_fn(pred, label):
         return loss_class(pred, label, batch_pad)
@@ -163,11 +162,6 @@ def train_network(rank, kwargs):
             # predict the runtimes
             pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
-            summaries = {"loss": loss.item()}
-
-            # log the loss to the logger
-            if rank == 0:
-                pbar.set_postfix({"loss": loss.item()})
 
             # backprop
             optimizer.zero_grad()
@@ -176,11 +170,23 @@ def train_network(rank, kwargs):
 
             # step the scheduler
             if scheduler is not None:
-                summaries["lr"] = scheduler.get_last_lr()[0]
                 scheduler.step()
 
-            # log the summaries
-            wandb.log(summaries)
+            # log the loss to the logger
+            if rank == 0:
+                # get the total loss
+                total_loss = dist.all_reduce(loss, op=dist.ReduceOp.SUM, async_op=True) / kwargs["world_size"]
+
+                # set postfix
+                pbar.set_postfix({"loss": total_loss.item()})
+
+                # log the summaries
+                wandb.log(
+                    {
+                        "loss": total_loss.item(),
+                        "lr": scheduler.get_last_lr()[0],
+                    }
+                )
 
             # break if necessary
             if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"]:
