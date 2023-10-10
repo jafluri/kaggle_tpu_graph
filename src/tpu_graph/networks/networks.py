@@ -177,37 +177,39 @@ class RetentiveAttention(nn.Module):
         key = self.key_embedding(x)
         query = self.query_embedding(x)
         values = self.value_embedding(x)
-        weights = key * query
 
-        # reshape the weights (list, graph, key_dim * n_heads) -> (graph, list, n_heads, key_dim)
-        weights = weights.reshape(x.shape[0], x.shape[1], -1, self.key_dim).transpose(0, 1)
-
-        # mean over the key dimension
-        weights = weights.mean(dim=-1)
+        # reshape the key (list, graph, key_dim * n_heads) -> (graph, list, n_heads, key_dim)
+        key = key.reshape(x.shape[0], x.shape[1], -1, self.key_dim).transpose(0, 1)
 
         # do the retentive attention
-        decay_tensor = torch.Tensor(self.decay)[None, None, :].to(weights.device)
-        iter_weights = weights
+        decay_tensor = torch.Tensor(self.decay)[None, None, :, None].to(key.device)
+        iter_key = key
         for i in range(1, self.n_iterations):
             # apply the decay
-            iter_weights = iter_weights * decay_tensor
+            iter_key = iter_key * decay_tensor
 
-            # shape to matrix (graph, list, n_heads) -> (graph , n_heads * list)
-            iter_weights = iter_weights.reshape(x.shape[1], -1)
-            iter_weights = torch.sparse.mm(connection_matrix, iter_weights)
+            # shape to matrix (graph, list, n_heads, key_dim) -> (graph , n_heads * list * key_dim)
+            iter_key = iter_key.reshape(x.shape[1], -1)
+            iter_key = torch.sparse.mm(connection_matrix, iter_key)
 
             # back to (graph, list, n_heads)
-            iter_weights = iter_weights.reshape(x.shape[1], x.shape[0], -1)
-            weights += iter_weights
+            iter_key = iter_key.reshape(x.shape[1], x.shape[0], -1, self.key_dim)
+            key += iter_key
 
         # weights are now (graph, list, n_heads)
-        weights = weights.transpose(0, 1)
+        key = key.transpose(0, 1)
+
+        # get the weights
+        weights = key * query.reshape(x.shape[0], x.shape[1], len(self.decay), -1)
+
+        # sum over the key dimension
+        weights = weights.mean(dim=-1, keepdim=True)
 
         # reshape the values
         values = values.reshape(x.shape[0], x.shape[1], len(self.decay), -1)
 
         # apply the weights
-        values = values * weights[..., None]
+        values = values * weights
 
         # apply normalization
         values = self.layernorm(values)
