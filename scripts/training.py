@@ -86,6 +86,7 @@ def train_network(rank, kwargs):
         list_shuffle=True,
         num_shards=kwargs["world_size"],
         shard_id=rank,
+        n_configs_per_file=kwargs["n_configs_per_file"],
     )
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
@@ -143,7 +144,11 @@ def train_network(rank, kwargs):
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
 
     # get the total number of batches per epoch
-    total = len(train_dataloader)
+    total = torch.Tensor(len(train_dataloader)).to(rank)
+    logger.info(f"Total number of batches per epoch (local): {len(train_dataloader)}")
+    dist.all_reduce(total, op=dist.ReduceOp.SUM, async_op=False)
+    total = total.item()
+    logger.info(f"Total number of batches per epoch (global): {total}")
     if kwargs["max_train_steps"] is not None:
         total = np.minimum(kwargs["max_train_steps"], len(train_dataloader))
 
@@ -305,7 +310,7 @@ def train_network(rank, kwargs):
     help="The list size to use for the training (number of samples per graph in the batch)",
 )
 @click.option("--weight_decay", type=float, default=0.0, help="The weight decay to use for training")
-@click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps")
+@click.option("--n_configs_per_file", type=int, default=512, help="The number of configs to read per file")
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
 def main(**kwargs):
     # setup the distributed training

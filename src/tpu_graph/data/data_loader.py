@@ -1,5 +1,4 @@
 import os
-from abc import ABCMeta, abstractmethod
 from pathlib import Path
 
 import numba as nb
@@ -12,9 +11,51 @@ from tpu_graph import logger
 from tpu_graph.constants import LOG_FEATURES
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
+from zipfile import ZipFile
 
 
-class TPUGraphDataset(Dataset, metaclass=ABCMeta):
+@nb.njit(nb.float32[:, :, :](nb.int64, nb.int64[:], nb.float32[:, :, :]))
+def fill_config_feat(n_nodes, node_config_ids: np.ndarray, node_config_feat: np.ndarray):
+    """
+    This routine is meant for the layout dataset.
+    Creates a full config feature vector with shape (n_nodes, n_config_features) from the sparse config feature vector
+    :param n_nodes: The number of nodes in the whole graph
+    :param node_config_ids: The ID of the config vectors that map the node_config_feature vectors to node ids
+    :param node_config_feat: The config features of the configurable nodes
+    :return: The fully padded config feature vectors
+    """
+
+    # we make fill all missing config features with 0
+    padded_config_feat = np.zeros((node_config_feat.shape[0], n_nodes, node_config_feat.shape[2]), dtype=np.float32)
+    for num, idx in enumerate(node_config_ids):
+        padded_config_feat[:, idx, :] = node_config_feat[:, num, :]
+
+    return padded_config_feat
+
+
+def load_from_npz(zf, name):
+    """
+    Loads a array from an npz file into a memmap
+    :param zf: The open npz file (open as ZipFile)
+    :param name: The name of the array to read out
+    :return: The memmap
+    """
+    # figure out offset of .npy in .npz
+    info = zf.NameToInfo[name + ".npy"]
+    assert info.compress_type == 0
+    zf.fp.seek(info.header_offset + len(info.FileHeader()) + 20)
+    # read .npy header
+    version = np.lib.format.read_magic(zf.fp)
+    np.lib.format._check_version(version)
+    shape, fortran_order, dtype = np.lib.format._read_array_header(zf.fp, version)
+    offset = zf.fp.tell()
+    # create memmap
+    return np.memmap(
+        zf.filename, dtype=dtype, shape=shape, order="F" if fortran_order else "C", mode="r", offset=offset
+    )
+
+
+class LayoutDataset(Dataset):
     """
     This is a base class for all datasets that are used in the TPUGraph project
     """
@@ -29,6 +70,7 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         clear_cache: bool = True,
         num_shards: int = 1,
         shard_id: int = 0,
+        n_configs_per_file: int | None = None,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -41,15 +83,18 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         :param clear_cache: If True, the cache is cleared, meaning the preprocessed data is ignored
         :param num_shards: The number of shards to use
         :param shard_id: The shard to use
+        :param n_configs_per_file: The number of configs per file to use
         """
 
         # save the attributes
         self.cutoff = cutoff
         self.list_size = list_size
         self.list_shuffle = list_shuffle
+        self.cache = cache
         self.clear_cache = clear_cache
         self.num_shards = num_shards
         self.shard_id = shard_id
+        self.n_configs_per_file = n_configs_per_file
 
         # create the encoder
         self.encoder = AddRandomWalkPE(
@@ -72,17 +117,24 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
 
         # we need open all files once to get the size of the dataset
         logger.info("Loading all files to get the size of the dataset")
+        # list for the sizes of the data, the data and the indices
         self.size_list = []
-        self.cache = cache
         self.data_dict = {}
         self.index_dict = {}
         for f in tqdm(self.file_list):
             with np.load(f) as data:
+                # get the size of the dataset, note that we might not load all configs
                 size = len(data["config_runtime"]) // self.list_size
+                if self.n_configs_per_file is not None:
+                    size = min(size, self.n_configs_per_file // self.list_size)
                 self.size_list.append(size)
 
-                # for the indices (which will be combined in the lists)
-                indices = np.arange(len(data["config_runtime"]))
+                # for the indices (which will be used to combine thethe lists)
+                if self.n_configs_per_file is not None:
+                    size = min(len(data["config_runtime"]), self.n_configs_per_file)
+                    indices = np.arange(size)
+                else:
+                    indices = np.arange(len(data["config_runtime"]))
                 if self.list_shuffle:
                     np.random.shuffle(indices)
                 self.index_dict[f] = indices
@@ -238,9 +290,27 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # if we cached the file we load it from the cache
         if self.cache and cache_path.exists():
             try:
-                _data = np.load(cache_path, allow_pickle=True)
-                _data = {k: v for k, v in _data.items()}
-                return _data
+                _data = np.load(cache_path, allow_pickle=True, mmap_mode="r")
+                # read out the data
+                _data_dict = {}
+                _data_dict["node_feat"] = _data["node_feat"][:]
+                _data_dict["node_opcode"] = _data["node_opcode"][:]
+                _data_dict["edge_index"] = _data["edge_index"][:]
+                _data_dict["pe"] = _data["pe"][:]
+                _data_dict["node_config_ids"] = _data["node_config_ids"][:]
+
+                # we only get a subset of the config features and runtimes
+                if self.n_configs_per_file is not None:
+                    indices = np.arange(len(_data["config_runtime"]))
+                    np.random.shuffle(indices)
+                    indices = indices[: self.n_configs_per_file]
+                    _data_dict["node_config_feat"] = _data["node_config_feat"][indices]
+                    _data_dict["config_runtime"] = _data["config_runtime"][indices]
+                else:
+                    _data_dict["node_config_feat"] = _data["node_config_feat"][:]
+                    _data_dict["config_runtime"] = _data["config_runtime"][:]
+
+                return _data_dict
             except Exception as e:
                 logger.error(f"Could not load {cache_path} because of {e}")
                 logger.error("Loading from original file")
@@ -257,16 +327,49 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # the positional encoding
         data["pe"] = self.get_positional_encoding(n_nodes, data["edge_index"])
 
-        # the indices of the samples
-        data["indices"] = np.arange(len(data["config_runtime"]))
-        if self.list_shuffle:
-            np.random.shuffle(data["indices"])
-
         # we write the file uncompressed back if caching is enabled
         if self.cache:
             np.savez(cache_path, **data, allow_pickle=True)
 
+        # we cut the data if we only want a subset of the configs
+        if self.n_configs_per_file is not None:
+            indices = data["indices"][: self.n_configs_per_file]
+            data["node_config_feat"] = data["node_config_feat"][indices]
+            data["config_runtime"] = data["config_runtime"][indices]
+
         return data
+
+    def load_new_configs(self):
+        """
+        Loads new configs into the data dicts
+        """
+
+        if self.n_configs_per_file is None:
+            logger.error("Cannot load new configs if n_configs_per_file is None")
+            return
+
+        # cycle through all files
+        for fname in self.file_list:
+            # get the cache name
+            cache_file = self._fname_to_cache_path(fname)
+
+            # load the data
+            if self.cache and cache_file.exists():
+                with np.load(cache_file, allow_pickle=True) as data:
+                    indices = np.arange(len(data["config_runtime"]))
+                    np.random.shuffle(indices)
+                    indices = indices[: self.n_configs_per_file]
+                    self.data_dict[fname]["config_runtime"] = data["config_runtime"][indices]
+
+                # here we need to do some black magic. NPZ files are loaded into normal arrays and not memmaps
+                zf = ZipFile(cache_file)
+                node_config_feat = load_from_npz(zf, "node_config_feat")
+
+                # read out the data
+                self.data_dict[fname]["node_config_feat"] = node_config_feat[indices]
+
+                # clean up
+                zf.close()
 
     def _fname_to_cache_path(self, fname):
         """
@@ -287,76 +390,6 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         """
 
         return self.length
-
-    @abstractmethod
-    def __getitem__(self, idx):
-        """
-        This has to be implemented by the child classed. Returns a sample from the dataset.
-        """
-
-
-@nb.njit(nb.float32[:, :, :](nb.int64, nb.int64[:], nb.float32[:, :, :]))
-def fill_config_feat(n_nodes, node_config_ids: np.ndarray, node_config_feat: np.ndarray):
-    """
-    This routine is meant for the layout dataset.
-    Creates a full config feature vector with shape (n_nodes, n_config_features) from the sparse config feature vector
-    :param n_nodes: The number of nodes in the whole graph
-    :param node_config_ids: The ID of the config vectors that map the node_config_feature vectors to node ids
-    :param node_config_feat: The config features of the configurable nodes
-    :return: The fully padded config feature vectors
-    """
-
-    # we make fill all missing config features with 0
-    padded_config_feat = np.zeros((node_config_feat.shape[0], n_nodes, node_config_feat.shape[2]), dtype=np.float32)
-    for num, idx in enumerate(node_config_ids):
-        padded_config_feat[:, idx, :] = node_config_feat[:, num, :]
-
-    return padded_config_feat
-
-
-class TileDataset(TPUGraphDataset):
-    """
-    This class implements the dataset for the tiles. It loads all the files and provides an interface to them.
-    """
-
-    def __getitem__(self, idx):
-        """
-        Loads a file into memory and returns a sample
-        :param idx: The index of the sample to return
-        :return: The sample
-        """
-
-        # get data and indices
-        data, indices = self.get_data_and_indices(idx)
-
-        # read out the data for this graph
-        node_feat = data["node_feat"]
-        node_opcode = data["node_opcode"]
-        pe = data["pe"]
-        edge_index = data["edge_index"]
-
-        # add node_feat and pe
-        node_feat = np.concatenate([node_feat, pe], axis=1)
-
-        # we divide by 5 to normalize the config features
-        config_feat = data["config_feat"][indices] / 5.0
-
-        # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
-        config_runtime = data["config_runtime"][indices] / data["config_runtime_normalizers"][indices]
-
-        # tile config_features such that axis 0 matches with the number of nodes
-        config_feat = np.tile(config_feat, (node_feat.shape[0], 1, 1)).transpose((1, 0, 2))
-        node_feat = np.tile(node_feat, (self.list_size, 1, 1))
-        node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
-        features = np.concatenate([node_opcode, node_feat[:], config_feat], axis=2)
-
-        return features, edge_index, config_runtime
-
-
-class LayoutDataset(TPUGraphDataset):
-    """
-    This class implements the dataset for the layout. It loads all the files and provides an interface to them.
-    """
 
     def __getitem__(self, idx):
         """
