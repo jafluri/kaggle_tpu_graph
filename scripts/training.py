@@ -54,6 +54,27 @@ def train_network(rank, kwargs):
     logger.info("Starting training of the tile network")
     setup(rank, kwargs["world_size"])
 
+    # setup wandb
+    if rank == 0:
+        # Start with the wandb init
+        logger.info("Starting wandb")
+        wandb.init(
+            mode="disabled",
+            project="TPU Graph",
+            config={
+                "learning_rate": kwargs["learning_rate"],
+                "dataset": "Tiles Dataset of the TPU Graph Benchmark",
+                "epochs": kwargs["epochs"],
+                "batch_size": kwargs["batch_size"],
+                "cosine_annealing": kwargs["cosine_annealing"],
+                "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
+                "list_size": kwargs["list_size"],
+            },
+        )
+
+        # print the run name
+        logger.info(f"Run ID: {wandb.run.name}")
+
     # load the dataset
     base_paths = [Path(p) for p in kwargs["data_path"]]
 
@@ -174,10 +195,8 @@ def train_network(rank, kwargs):
 
             # log the loss to the logger
             total_loss = loss.detach() / kwargs["world_size"]
+            dist.reduce(total_loss, dst=0, op=dist.ReduceOp.SUM, async_op=False)
             if rank == 0:
-                # get the total loss
-                dist.reduce(total_loss, dst=0, op=dist.ReduceOp.SUM, async_op=False)
-
                 # set postfix
                 pbar.set_postfix({"loss": total_loss.item()})
 
@@ -297,40 +316,7 @@ def train_network(rank, kwargs):
 @click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps")
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
 def main(**kwargs):
-    # create a logger for the training
-    logger = logging.getLogger("tpu_network.train.main")
-    log_formatter = logging.Formatter(
-        fmt="%(asctime)s %(name)10s %(levelname).3s   %(message)s ", datefmt="%y-%m-%d %H:%M:%S", style="%"
-    )
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(log_formatter)
-    logger.addHandler(stream_handler)
-    logger.propagate = False
-    logger.setLevel(logging.INFO)
-
-    logger.info("Starting the training")
-
-    # Start with the wandb init
-    logger.info("Starting wandb")
-    wandb.init(
-        mode="disabled",
-        project="TPU Graph",
-        config={
-            "learning_rate": kwargs["learning_rate"],
-            "dataset": "Tiles Dataset of the TPU Graph Benchmark",
-            "epochs": kwargs["epochs"],
-            "batch_size": kwargs["batch_size"],
-            "cosine_annealing": kwargs["cosine_annealing"],
-            "network_type": "Layout Network" if kwargs["layout_network"] else "Tile Network",
-            "list_size": kwargs["list_size"],
-        },
-    )
-
-    # print the run name
-    logger.info(f"Run ID: {wandb.run.name}")
-
     # setup the distributed training
-    logger.info("Setting up the distributed training")
     mp.spawn(train_network, args=(kwargs,), nprocs=kwargs["world_size"])
 
 
