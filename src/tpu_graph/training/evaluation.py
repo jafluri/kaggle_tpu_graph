@@ -33,8 +33,8 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, device="c
 
             # eval the network
             pred_runtimes = network(features, edge_index, lengths)
-            predictions.append(pred_runtimes.cpu().detach().numpy())
-            labels.append(torch.squeeze(runtimes).cpu().detach().numpy())
+            predictions.append(pred_runtimes.cpu().detach().numpy().ravel())
+            labels.append(runtimes.cpu().detach().numpy().ravel())
 
             # calculate the loss and log it
             loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=True)

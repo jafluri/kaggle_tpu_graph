@@ -113,7 +113,7 @@ def train_tile_network(**kwargs):
         list_size=1,
         clear_cache=kwargs["clear_cache"],
     )
-    val_dataloader = val_dataset.get_dataloader(batch_size=33, shuffle=False, drop_last=False)
+    val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     logger.info("Loading the dataset for testing")
     test_dataset = dataset_class(
@@ -122,7 +122,7 @@ def train_tile_network(**kwargs):
         list_size=1,
         clear_cache=kwargs["clear_cache"],
     )
-    test_dataloader = test_dataset.get_dataloader(batch_size=33, shuffle=False, drop_last=False)
+    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")

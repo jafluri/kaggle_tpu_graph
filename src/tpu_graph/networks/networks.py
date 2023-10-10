@@ -126,7 +126,12 @@ class RetentiveAttention(nn.Module):
     """
 
     def __init__(
-        self, in_channels: int, out_channels: int, key_dim: int = 16, n_iterations: int = 3, decay: float = 0.5
+        self,
+        in_channels: int,
+        out_channels: int,
+        key_dim: int = 16,
+        n_iterations: int = 3,
+        decay: list[float] | None = None,
     ):
         """
         Inits the layer
@@ -134,7 +139,9 @@ class RetentiveAttention(nn.Module):
         :param out_channels: Number of output channels
         :param key_dim: The dimension of the keys
         :param n_iterations: The number of iterations
-        :param decay: The decay factor for the attention
+        :param decay: A list of decay values for the different attention heads (defaults to 8 linearly spaced values),
+                      note that the number of heads is inferred from the length of the list and needs to evently
+                      divide the output dimension
         """
 
         # init the super class
@@ -145,11 +152,14 @@ class RetentiveAttention(nn.Module):
         self.out_channels = out_channels
         self.key_dim = key_dim
         self.n_iterations = n_iterations
+
+        if decay is None:
+            decay = np.linspace(0.1, 0.9, 8)
         self.decay = decay
 
         # the linear layers
-        self.key_embedding = nn.Linear(in_channels, key_dim, bias=False)
-        self.query_embedding = nn.Linear(in_channels, key_dim, bias=False)
+        self.key_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
+        self.query_embedding = nn.Linear(in_channels, key_dim * len(decay), bias=False)
         self.value_embedding = nn.Linear(in_channels, out_channels, bias=False)
         self.layernorm = nn.LayerNorm(out_channels)
 
@@ -167,25 +177,43 @@ class RetentiveAttention(nn.Module):
         key = self.key_embedding(x)
         query = self.query_embedding(x)
         values = self.value_embedding(x)
-        weights = (key * query).mean(dim=-1, keepdim=True)
+        weights = key * query
 
-        # prep the matrix
-        with torch.no_grad():
-            ret_connection_matrix = connection_matrix * self.decay
-            for i in range(1, self.n_iterations):
-                ret_connection_matrix += torch.sparse.mm(ret_connection_matrix, connection_matrix)
-            ret_connection_matrix = ret_connection_matrix.coalesce()
+        # reshape the weights (list, graph, key_dim * n_heads) -> (graph, list, n_heads, key_dim)
+        weights = weights.reshape(x.shape[0], x.shape[1], -1, self.key_dim).transpose(0, 1)
 
-        # now the recursive retention, weights are now (graph, list)
-        iter_weights = torch.squeeze(weights, dim=-1).T
-        # apply the connection matrix with the decay (apply it directly to the weights because everything is linear)
-        iter_weights = torch.sparse.mm(ret_connection_matrix, iter_weights)
+        # mean over the key dimension
+        weights = weights.mean(dim=-1)
 
-        # reshape and add to weights
-        weights = weights + iter_weights.T.unsqueeze(-1)
+        # do the retentive attention
+        decay_tensor = torch.Tensor(self.decay)[None, None, :].to(weights.device)
+        iter_weights = weights
+        for i in range(1, self.n_iterations):
+            # apply the decay
+            iter_weights = iter_weights * decay_tensor
+
+            # shape to matrix (graph, list, n_heads) -> (graph , n_heads * list)
+            iter_weights = iter_weights.reshape(x.shape[1], -1)
+            iter_weights = torch.sparse.mm(connection_matrix, iter_weights)
+
+            # back to (graph, list, n_heads)
+            iter_weights = iter_weights.reshape(x.shape[1], x.shape[0], -1)
+            weights += iter_weights
+
+        # weights are now (graph, list, n_heads)
+        weights = weights.transpose(0, 1)
+
+        # reshape the values
+        values = values.reshape(x.shape[0], x.shape[1], len(self.decay), -1)
+
+        # apply the weights
+        values = values * weights[..., None]
+
+        # reshape back to (list, graph, out)
+        values = values.reshape(x.shape[1], x.shape[0], -1).transpose(0, 1)
 
         # apply the values
-        output = self.layernorm(values * weights)
+        output = self.layernorm(values)
 
         return output, connection_matrix
 
@@ -318,4 +346,4 @@ class TPUGraphNetwork(nn.Module):
         # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
 
-        return torch.squeeze(runtimes.transpose(0, 1))
+        return torch.squeeze(runtimes.transpose(0, 1), dim=-1)
