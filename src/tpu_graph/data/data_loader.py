@@ -321,8 +321,8 @@ class LayoutDataset(Dataset):
                     indices = np.arange(len(_data["config_runtime"]))
                     np.random.shuffle(indices)
                     indices = indices[: self.n_configs_per_file]
-                    _data_dict["node_config_feat"] = _data["node_config_feat"][indices]
-                    _data_dict["config_runtime"] = self.read_config_memmap(cache_path, indices)
+                    _data_dict["config_runtime"] = _data["config_runtime"][indices]
+                    _data_dict["node_config_feat"] = self.read_config_memmap(cache_path, indices)
                 else:
                     _data_dict["node_config_feat"] = _data["node_config_feat"][:]
                     _data_dict["config_runtime"] = _data["config_runtime"][:]
