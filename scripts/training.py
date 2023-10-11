@@ -269,8 +269,9 @@ def train_network(rank, kwargs):
         train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     # save the model
-    logger.info("Saving the model")
-    torch.save(network.state_dict(), save_path.joinpath(f"{run_name}.pt"))
+    if rank == 0:
+        logger.info("Saving the final model")
+        torch.save(network.state_dict(), save_path.joinpath(f"{run_name}.pt"))
 
     # cleanup
     cleanup()
