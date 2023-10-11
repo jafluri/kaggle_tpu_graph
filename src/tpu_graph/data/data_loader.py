@@ -109,7 +109,7 @@ class LayoutDataset(Dataset):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:7]
+            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:2]
             # now we split the files into shards
             file_list = list(np.array_split(file_list, num_shards)[shard_id])
             logger.info(f"Found {len(file_list)} files in {path}")

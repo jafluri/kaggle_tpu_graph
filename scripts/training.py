@@ -255,6 +255,7 @@ def train_network(rank, kwargs):
             network,
             test_dataloader,
             save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_test.npz"),
+            device=rank,
         )
         # log everything
         logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
