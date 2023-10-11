@@ -346,8 +346,6 @@ class LayoutDataset(Dataset):
         n_nodes = data["node_feat"].shape[0]
 
         # the positional encoding
-        print("WHY AM I HERE????", flush=True)
-        print(cache_path, flush=True)
         data["pe"] = self.get_positional_encoding(n_nodes, data["edge_index"])
 
         # we write the file uncompressed back if caching is enabled
