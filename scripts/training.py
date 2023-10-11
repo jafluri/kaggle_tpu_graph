@@ -58,7 +58,6 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
-            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -262,6 +261,9 @@ def train_network(rank, kwargs):
     logger.info("Saving the model")
     torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))
 
+    # cleanup
+    cleanup()
+
 
 @click.command()
 @click.option(
@@ -305,7 +307,7 @@ def train_network(rank, kwargs):
 @click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps per epoch")
 def main(**kwargs):
     # setup the distributed training
-    mp.spawn(train_network, args=(kwargs,), nprocs=kwargs["world_size"])
+    mp.spawn(train_network, args=(kwargs,), nprocs=kwargs["world_size"], join=True)
 
 
 if __name__ == "__main__":
