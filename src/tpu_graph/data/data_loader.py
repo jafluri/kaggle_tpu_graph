@@ -324,8 +324,8 @@ class LayoutDataset(Dataset):
                     _data_dict["config_runtime"] = _data["config_runtime"][indices]
                     try:
                         _data_dict["node_config_feat"] = self.read_config_memmap(cache_path, indices)
-                    except ValueError:
-                        logger.error(f"Could not memmap {cache_path} because of ValueError, using original file")
+                    except Exception as e:
+                        logger.error(f"Could not memmap {cache_path} because of {e}, using original file")
                         _data_dict["node_config_feat"] = _data["node_config_feat"][indices]
                 else:
                     _data_dict["node_config_feat"] = _data["node_config_feat"][:]
@@ -385,8 +385,8 @@ class LayoutDataset(Dataset):
                     try:
                         # read out the data from the config
                         self.data_dict[fname]["node_config_feat"] = self.read_config_memmap(cache_file, indices)
-                    except ValueError:
-                        logger.error(f"Could not memmap {cache_file} because of ValueError, using original file")
+                    except Exception as e:
+                        logger.error(f"Could not memmap {cache_file} because of {e}, using original file")
                         self.data_dict[fname]["node_config_feat"] = data["node_config_feat"][indices]
 
     def _fname_to_cache_path(self, fname):
