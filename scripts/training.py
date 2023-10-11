@@ -144,9 +144,9 @@ def train_network(rank, kwargs):
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
 
     # get the total number of batches per epoch
-    total = torch.Tensor(len(train_dataloader)).to(rank)
+    total = torch.tensor(len(train_dataloader)).to(rank)
     logger.info(f"Total number of batches per epoch (local): {len(train_dataloader)}")
-    dist.all_reduce(total, op=dist.ReduceOp.SUM, async_op=False)
+    dist.all_reduce(total, op=dist.ReduceOp.MIN, async_op=False)
     total = total.item()
     logger.info(f"Total number of batches per epoch (global): {total}")
     if kwargs["max_train_steps"] is not None:
