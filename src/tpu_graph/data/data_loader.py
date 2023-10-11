@@ -273,6 +273,23 @@ class LayoutDataset(Dataset):
 
         return data.random_walk_pe.cpu().numpy()
 
+    def read_config_memmap(self, fname, indices):
+        """
+        Reads config features from memmap
+        :param fname: The npz file
+        :param indices: The indices to read out
+        :return: The data
+        """
+
+        # here we need to do some black magic. NPZ files are loaded into normal arrays and not memmaps
+        zf = ZipFile(fname)
+        node_config_feat = load_from_npz(zf, "node_config_feat")[indices]
+
+        # clean up
+        zf.close()
+
+        return node_config_feat
+
     def read_data(self, data: dict[str : np.ndarray]):
         """
         Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
@@ -305,7 +322,7 @@ class LayoutDataset(Dataset):
                     np.random.shuffle(indices)
                     indices = indices[: self.n_configs_per_file]
                     _data_dict["node_config_feat"] = _data["node_config_feat"][indices]
-                    _data_dict["config_runtime"] = _data["config_runtime"][indices]
+                    _data_dict["config_runtime"] = self.read_config_memmap(cache_path, indices)
                 else:
                     _data_dict["node_config_feat"] = _data["node_config_feat"][:]
                     _data_dict["config_runtime"] = _data["config_runtime"][:]
@@ -361,15 +378,8 @@ class LayoutDataset(Dataset):
                     indices = indices[: self.n_configs_per_file]
                     self.data_dict[fname]["config_runtime"] = data["config_runtime"][indices]
 
-                # here we need to do some black magic. NPZ files are loaded into normal arrays and not memmaps
-                zf = ZipFile(cache_file)
-                node_config_feat = load_from_npz(zf, "node_config_feat")
-
-                # read out the data
-                self.data_dict[fname]["node_config_feat"] = node_config_feat[indices]
-
-                # clean up
-                zf.close()
+                # read out the data from the config
+                self.data_dict[fname]["node_config_feat"] = self.read_config_memmap(cache_file, indices)
 
     def _fname_to_cache_path(self, fname):
         """

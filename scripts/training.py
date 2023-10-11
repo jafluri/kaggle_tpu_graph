@@ -212,7 +212,7 @@ def train_network(rank, kwargs):
                 )
 
             # break if necessary
-            if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"]:
+            if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"] - 1:
                 break
 
     #     # save the network for this epoch
@@ -312,6 +312,7 @@ def train_network(rank, kwargs):
 @click.option("--weight_decay", type=float, default=0.0, help="The weight decay to use for training")
 @click.option("--n_configs_per_file", type=int, default=512, help="The number of configs to read per file")
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
+@click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps per epoch")
 def main(**kwargs):
     # setup the distributed training
     mp.spawn(train_network, args=(kwargs,), nprocs=kwargs["world_size"])
