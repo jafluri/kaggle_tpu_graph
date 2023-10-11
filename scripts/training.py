@@ -70,8 +70,17 @@ def train_network(rank, kwargs):
             },
         )
 
+        # get the name
+        run_name = wandb.run.name
+
         # print the run name
-        logger.info(f"Run ID: {wandb.run.name}")
+        logger.info(f"Run ID: {run_name}")
+    else:
+        run_name = "foo"
+
+    # broadcast the run name
+    dist.broadcast_object_list([run_name], src=0)
+    logger.info(f"Run ID: {run_name}")
 
     # load the dataset
     base_paths = [Path(p) for p in kwargs["data_path"]]
@@ -221,13 +230,13 @@ def train_network(rank, kwargs):
         # save the network for this epoch
         logger.info("Saving the model")
         if rank == 0:
-            torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
+            torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
 
         logger.info("Validating the network")
         avg_loss, avg_kendall = evaluation.evaluate_layout_network(
             network,
             val_dataloader,
-            save_path.joinpath(f"{wandb.run.name}_{rank=}_{epoch=}_val.npz"),
+            save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_val.npz"),
         )
         # log everything
         logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
@@ -243,7 +252,7 @@ def train_network(rank, kwargs):
         avg_loss, avg_kendall = evaluation.evaluate_layout_network(
             network,
             test_dataloader,
-            save_path.joinpath(f"{wandb.run.name}_{rank=}_{epoch=}_test.npz"),
+            save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_test.npz"),
         )
         # log everything
         logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
@@ -259,7 +268,7 @@ def train_network(rank, kwargs):
 
     # save the model
     logger.info("Saving the model")
-    torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))
+    torch.save(network.state_dict(), save_path.joinpath(f"{run_name}.pt"))
 
     # cleanup
     cleanup()
