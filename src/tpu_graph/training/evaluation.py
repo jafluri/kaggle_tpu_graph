@@ -100,12 +100,14 @@ def evaluate_layout_network(
     network: TPUGraphNetwork,
     dataloader: DataLoader,
     save_path: str | bytes | os.PathLike = None,
+    device="cuda",
 ):
     """
     Evaluates the layout network on the given dataloader
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
     :param save_path: The path where to save the predictions etc. (NPZ file)
+    :param device: The device to use
     :return: The average loss (log mse) and the average Kendall's Tau
     """
 
@@ -113,7 +115,7 @@ def evaluate_layout_network(
     dataset = dataloader.dataset
 
     # evaluate the network
-    avg_loss, predictions, labels = evaluate_network(network, dataloader)
+    avg_loss, predictions, labels = evaluate_network(network, dataloader, device=device)
 
     # split the predictions and labels according to the files
     split_predictions = np.split(predictions, dataset.offsets[:-1])

@@ -58,6 +58,7 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
+            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -79,7 +80,7 @@ def train_network(rank, kwargs):
         run_name = "foo"
 
     # broadcast the run name
-    dist.broadcast_object_list([run_name], src=0)
+    dist.broadcast_object_list([run_name], src=0, device=torch.device("cpu"))
     logger.info(f"Run ID: {run_name}")
 
     # load the dataset
@@ -228,8 +229,8 @@ def train_network(rank, kwargs):
                 break
 
         # save the network for this epoch
-        logger.info("Saving the model")
         if rank == 0:
+            logger.info("Saving the model")
             torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
 
         logger.info("Validating the network")
@@ -237,6 +238,7 @@ def train_network(rank, kwargs):
             network,
             val_dataloader,
             save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_val.npz"),
+            device=rank,
         )
         # log everything
         logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
