@@ -13,7 +13,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, SAGEConv, GPSConv
 
-# from tpu_graph.training import evaluation
+from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
 
@@ -90,23 +90,27 @@ def train_network(rank, kwargs):
     )
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
-    # logger.info("Loading the dataset for validation")
-    # val_dataset = dataset_class(
-    #     [base_path.joinpath("valid") for base_path in base_paths],
-    #     cache=kwargs["cache"],
-    #     list_size=1,
-    #     clear_cache=kwargs["clear_cache"],
-    # )
-    # val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
-    #
-    # logger.info("Loading the dataset for testing")
-    # test_dataset = dataset_class(
-    #     [base_path.joinpath("test") for base_path in base_paths],
-    #     cache=kwargs["cache"],
-    #     list_size=1,
-    #     clear_cache=kwargs["clear_cache"],
-    # )
-    # test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
+    logger.info("Loading the dataset for validation")
+    val_dataset = LayoutDataset(
+        [base_path.joinpath("valid") for base_path in base_paths],
+        cache=kwargs["cache"],
+        list_size=1,
+        clear_cache=kwargs["clear_cache"],
+        num_shards=kwargs["world_size"],
+        shard_id=rank,
+    )
+    val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
+
+    logger.info("Loading the dataset for testing")
+    test_dataset = LayoutDataset(
+        [base_path.joinpath("test") for base_path in base_paths],
+        cache=kwargs["cache"],
+        list_size=1,
+        clear_cache=kwargs["clear_cache"],
+        num_shards=kwargs["world_size"],
+        shard_id=rank,
+    )
+    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
@@ -131,14 +135,14 @@ def train_network(rank, kwargs):
         projection_network=projection_network,
     )
 
-    # restore the model if necessary
-    if kwargs["restore_path"] is not None:
-        logger.info("Restoring the model")
-        network.load_state_dict(torch.load(kwargs["restore_path"]))
-
     # network to GPU
     network = network.to(rank)
     network = DDP(network, device_ids=[rank])
+
+    # restore the model if necessary
+    if kwargs["restore_path"] is not None and rank == 0:
+        logger.info("Restoring the model")
+        network.load_state_dict(torch.load(kwargs["restore_path"]))
 
     # get the optimizer
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
@@ -215,62 +219,48 @@ def train_network(rank, kwargs):
             if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"] - 1:
                 break
 
-    #     # save the network for this epoch
-    #     logger.info("Saving the model")
-    #     torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
-    #
-    #     # validate the network
-    #     if kwargs["layout_network"]:
-    #         logger.info("Validating the network")
-    #         avg_loss, avg_kendall = evaluation.evaluate_layout_network(
-    #             network,
-    #             val_dataloader,
-    #             save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
-    #         )
-    #         # log everything
-    #         wandb.log({"val_loss": avg_loss, "val_avg_kendall": avg_kendall}, commit=False)
-    #         logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
-    #
-    #         # test the network
-    #         logger.info("Testing the network")
-    #         avg_loss, avg_kendall = evaluation.evaluate_layout_network(
-    #             network,
-    #             test_dataloader,
-    #             save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
-    #         )
-    #         # log everything
-    #         wandb.log({"test_loss": avg_loss, "test_avg_kendall": avg_kendall})
-    #         logger.info(f"Average kendall for epoch {epoch}: {avg_kendall}")
-    #     else:
-    #         logger.info("Validating the network")
-    #         avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-    #             network,
-    #             val_dataloader,
-    #             save_path.joinpath(f"{wandb.run.name}_{epoch=}_val.npz"),
-    #         )
-    #         # log everything
-    #         wandb.log({"val_loss": avg_loss, "val_avg_slowdown": avg_slowdown}, commit=False)
-    #         logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
-    #
-    #         # test the network
-    #         logger.info("Testing the network")
-    #         avg_loss, avg_slowdown = evaluation.evaluate_tile_network(
-    #             network,
-    #             test_dataloader,
-    #             save_path.joinpath(f"{wandb.run.name}_{epoch=}_test.npz"),
-    #         )
-    #         # log everything
-    #         wandb.log({"test_loss": avg_loss, "test_avg_slowdown": avg_slowdown})
-    #         logger.info(f"Average slowdown for epoch {epoch}: {avg_slowdown}")
-    #
-    #     # reshuffle the dataset
-    #     logger.info("Reshuffling the dataset")
-    #     train_dataset.reshuffle_indices()
-    #     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
-    #
-    # # save the model
-    # logger.info("Saving the model")
-    # torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))
+        # save the network for this epoch
+        logger.info("Saving the model")
+        if rank == 0:
+            torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}_{epoch=}.pt"))
+
+        logger.info("Validating the network")
+        avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+            network,
+            val_dataloader,
+            save_path.joinpath(f"{wandb.run.name}_{rank=}_{epoch=}_val.npz"),
+        )
+        # log everything
+        logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
+        total_avg_kendall = torch.tensor(avg_kendall).to(rank) / kwargs["world_size"]
+        dist.all_reduce(total_avg_kendall, op=dist.ReduceOp.SUM, async_op=False)
+        avg_kendall = total_avg_kendall.item()
+        logger.info(f"Average kendall for epoch {epoch} (global): {avg_kendall}")
+        if rank == 0:
+            wandb.log({"val_loss": avg_loss, "val_avg_kendall": avg_kendall}, commit=False)
+
+        # test the network
+        logger.info("Testing the network")
+        avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+            network,
+            test_dataloader,
+            save_path.joinpath(f"{wandb.run.name}_{rank=}_{epoch=}_test.npz"),
+        )
+        # log everything
+        logger.info(f"Average kendall for epoch {epoch} (local): {avg_kendall}")
+        total_avg_kendall = torch.tensor(avg_kendall).to(rank) / kwargs["world_size"]
+        dist.all_reduce(total_avg_kendall, op=dist.ReduceOp.SUM, async_op=False)
+        avg_kendall = total_avg_kendall.item()
+        logger.info(f"Average kendall for epoch {epoch} (global): {avg_kendall}")
+
+        # reshuffle the dataset
+        logger.info("Loading new configs...")
+        train_dataset.load_new_configs()
+        train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
+
+    # save the model
+    logger.info("Saving the model")
+    torch.save(network.state_dict(), save_path.joinpath(f"{wandb.run.name}.pt"))
 
 
 @click.command()
