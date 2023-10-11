@@ -43,10 +43,17 @@ def load_from_npz(zf, name):
     # figure out offset of .npy in .npz
     info = zf.NameToInfo[name + ".npy"]
     assert info.compress_type == 0
-    zf.fp.seek(info.header_offset + len(info.FileHeader()) + 20)
-    # read .npy header
-    version = np.lib.format.read_magic(zf.fp)
-    np.lib.format._check_version(version)
+    # don't ask me why it is 20 bytes, but it works
+    try:
+        zf.fp.seek(info.header_offset + len(info.FileHeader()) + 20)
+        # read .npy header
+        version = np.lib.format.read_magic(zf.fp)
+        np.lib.format._check_version(version)
+    except Exception:
+        zf.fp.seek(info.header_offset + len(info.FileHeader()) - 20)
+        # read .npy header
+        version = np.lib.format.read_magic(zf.fp)
+        np.lib.format._check_version(version)
     shape, fortran_order, dtype = np.lib.format._read_array_header(zf.fp, version)
     offset = zf.fp.tell()
     # create memmap
