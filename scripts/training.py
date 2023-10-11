@@ -79,7 +79,9 @@ def train_network(rank, kwargs):
         run_name = "foo"
 
     # broadcast the run name
-    dist.broadcast_object_list([run_name], src=0, device=torch.device(rank))
+    object_list = [run_name]
+    dist.broadcast_object_list(object_list, src=0, device=torch.device(rank))
+    run_name = object_list[0]
     logger.info(f"Run ID: {run_name}")
 
     # load the dataset
