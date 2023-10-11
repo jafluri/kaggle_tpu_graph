@@ -80,7 +80,7 @@ def train_network(rank, kwargs):
         run_name = "foo"
 
     # broadcast the run name
-    dist.broadcast_object_list([run_name], src=0, device=torch.device("cpu"))
+    dist.broadcast_object_list([run_name], src=0, device=torch.device(rank))
     logger.info(f"Run ID: {run_name}")
 
     # load the dataset
@@ -225,7 +225,7 @@ def train_network(rank, kwargs):
                 )
 
             # break if necessary
-            if kwargs["max_train_steps"] is not None and batch_idx >= kwargs["max_train_steps"] - 1:
+            if kwargs["max_train_steps"] is not None and batch_idx >= total - 1:
                 break
 
         # save the network for this epoch
