@@ -322,7 +322,11 @@ class LayoutDataset(Dataset):
                     np.random.shuffle(indices)
                     indices = indices[: self.n_configs_per_file]
                     _data_dict["config_runtime"] = _data["config_runtime"][indices]
-                    _data_dict["node_config_feat"] = self.read_config_memmap(cache_path, indices)
+                    try:
+                        _data_dict["node_config_feat"] = self.read_config_memmap(cache_path, indices)
+                    except ValueError:
+                        logger.error(f"Could not memmap {cache_path} because of ValueError, using original file")
+                        _data_dict["node_config_feat"] = _data["node_config_feat"][indices]
                 else:
                     _data_dict["node_config_feat"] = _data["node_config_feat"][:]
                     _data_dict["config_runtime"] = _data["config_runtime"][:]
@@ -378,8 +382,12 @@ class LayoutDataset(Dataset):
                     indices = indices[: self.n_configs_per_file]
                     self.data_dict[fname]["config_runtime"] = data["config_runtime"][indices]
 
-                # read out the data from the config
-                self.data_dict[fname]["node_config_feat"] = self.read_config_memmap(cache_file, indices)
+                    try:
+                        # read out the data from the config
+                        self.data_dict[fname]["node_config_feat"] = self.read_config_memmap(cache_file, indices)
+                    except ValueError:
+                        logger.error(f"Could not memmap {cache_file} because of ValueError, using original file")
+                        self.data_dict[fname]["node_config_feat"] = data["node_config_feat"][indices]
 
     def _fname_to_cache_path(self, fname):
         """
