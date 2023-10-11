@@ -225,7 +225,7 @@ def train_network(rank, kwargs):
                 )
 
             # break if necessary
-            if kwargs["max_train_steps"] is not None and batch_idx >= total - 1:
+            if batch_idx >= total - 1:
                 break
 
         # save the network for this epoch
