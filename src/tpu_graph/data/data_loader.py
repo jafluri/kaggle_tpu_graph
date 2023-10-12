@@ -322,10 +322,13 @@ class TileDataset(TPUGraphDataset):
         data, indices = self.get_data_and_indices(idx)
 
         # read out the data for this graph
-        node_feat = data["node_feat"]
+        node_feat = data["node_feat"].copy()
         node_opcode = data["node_opcode"]
         pe = data["pe"]
         edge_index = data["edge_index"]
+
+        # log some of the features
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)
