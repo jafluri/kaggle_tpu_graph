@@ -117,10 +117,12 @@ class LayoutDataset(Dataset):
         self.file_list = []
         for path in self.data_path:
             file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")]
-            # now we split the files into shards
-            file_list = list(np.array_split(file_list, num_shards)[shard_id])
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
+
+        # now we split the files into shards
+        self.file_list = list(np.array_split(self.file_list, num_shards)[shard_id])
+        logger.info(f"Using {len(self.file_list)} files for shard {shard_id}")
 
         # we need open all files once to get the size of the dataset
         logger.info("Loading all files to get the size of the dataset")
