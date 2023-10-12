@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES, LOG_FEATURES_TILE
+from tpu_graph.constants import LOG_FEATURES, LOG_FEATURES_TILE, MAX_OP_CODE
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
@@ -240,8 +240,19 @@ class TPUGraphDataset(Dataset, metaclass=ABCMeta):
         # we need to convert the data to a dict because of the caching
         data = {k: v for k, v in data.items()}
 
+        # we add an additional node to the graph that is the output node
+        outputs = np.where(data["node_feat"][:, 0] == 1)[0]
+        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
+        new_edges[:, 1] = outputs
+        new_edges[:, 0] = len(data["node_feat"])
+        new_edges = np.concatenate([data["edge_index"], new_edges], axis=0)
+
         # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
-        data["edge_index"] = np.fliplr(data["edge_index"]).T.copy()
+        data["edge_index"] = np.fliplr(new_edges).T.copy()
+
+        # we add an artificial node feature node and opcode
+        data["node_feat"] = np.concatenate([data["node_feat"], np.zeros((1, data["node_feat"].shape[1]))], axis=0)
+        data["node_opcode"] = np.concatenate([data["node_opcode"], np.array([MAX_OP_CODE - 1])], axis=0)
 
         # get the number of nodes
         n_nodes = data["node_feat"].shape[0]
