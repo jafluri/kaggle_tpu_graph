@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES
+from tpu_graph.constants import LOG_FEATURES, LOG_FEATURES_TILE
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
@@ -322,10 +322,17 @@ class TileDataset(TPUGraphDataset):
         data, indices = self.get_data_and_indices(idx)
 
         # read out the data for this graph
-        node_feat = data["node_feat"]
+        node_feat = data["node_feat"].copy()
         node_opcode = data["node_opcode"]
         pe = data["pe"]
         edge_index = data["edge_index"]
+
+        # log some of the features
+        node_feat[:, LOG_FEATURES_TILE] = np.log(node_feat[:, LOG_FEATURES_TILE] + 1)
+        # some special features
+        node_feat[:, [61, 62, 67, 127, 131]] = np.log(
+            node_feat[:, [61, 62, 67, 127, 131]] + np.array([[2, 2, 3, 40, 25]])
+        )
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)
