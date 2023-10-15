@@ -6,7 +6,6 @@ from scipy.stats import kendalltau
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from . import losses
 from ..networks.networks import TPUGraphNetwork
 
 
@@ -16,14 +15,14 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, device="c
     :param network: The network to evaluate
     :param dataloader: The dataloader to use
     :param device: The device to use
-    :return: The average loss, predictions and labels
+    :return: The graph embeddings, predictions and labels
     """
 
     # evaluate the network
-    pbar = tqdm(dataloader, postfix={"loss": 0})
+    pbar = tqdm(dataloader)
     predictions = []
     labels = []
-    loss_vals = []
+    embedding_vals = []
     with torch.no_grad():
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to device
@@ -32,68 +31,20 @@ def evaluate_network(network: TPUGraphNetwork, dataloader: DataLoader, device="c
             edge_index = edge_index.to(device)
 
             # eval the network
-            pred_runtimes = network(features, edge_index, lengths)
+            graph_embedding, pred_runtimes = network(features, edge_index, lengths)
+            # graph embeddings should be list, batch, out with list dim 1
+            embedding_vals.append(graph_embedding.cpu().detach().numpy()[0])
+            # pred runtimes should be batch, 1
             predictions.append(pred_runtimes.cpu().detach().numpy().ravel())
             labels.append(runtimes.cpu().detach().numpy().ravel())
 
-            # calculate the loss and log it
-            loss = losses.square_loss(pred=pred_runtimes, label=runtimes, log=True)
-            loss_vals.append(loss.item())
-            pbar.set_postfix({"loss": loss.item()})
-
-    # the average loss
-    avg_loss = np.mean(loss_vals)
-
-    # concat predictions and labels and split according to files
+    # concat embeddings, predictions and labels and split according to files
+    embedding_vals = np.concatenate(embedding_vals, axis=0)
     predictions = np.concatenate(predictions, axis=0)
     labels = np.concatenate(labels, axis=0)
 
     # return the average loss, predictions and labels
-    return avg_loss, predictions, labels
-
-
-def evaluate_tile_network(
-    network: TPUGraphNetwork,
-    dataloader: DataLoader,
-    save_path: str | bytes | os.PathLike = None,
-):
-    """
-    Evaluates the tile network on the given dataloader
-    :param network: The network to evaluate
-    :param dataloader: The dataloader to use
-    :param save_path: If not None, the path where to save the predictions etc. (NPZ file)
-    :return: The average loss (log mse) and the average slowdown
-    """
-
-    # get the dset from the dataloader
-    dataset = dataloader.dataset
-
-    # evaluate the network
-    avg_loss, predictions, labels = evaluate_network(network, dataloader)
-
-    # split the predictions and labels according to the files
-    split_predictions = np.split(predictions, dataset.offsets[:-1])
-    split_labels = np.split(labels, dataset.offsets[:-1])
-
-    # calculate the average slowdown
-    slowdowns, top_ks = losses.slowdown(split_predictions, split_labels)
-    avg_slowdown = np.mean(slowdowns)
-
-    # save everything if save_path is not None
-    if save_path is not None:
-        # save the predictions and labels
-        np.savez(
-            save_path,
-            predictions=predictions,
-            labels=labels,
-            offsets=dataset.offsets,
-            file_list=np.array([str(f) for f in dataset.file_list]),
-            slowdowns=slowdowns,
-            top_ks=np.array(top_ks, dtype=object),
-        )
-
-    # return the average loss and slowdown
-    return avg_loss, avg_slowdown
+    return embedding_vals, predictions, labels
 
 
 def evaluate_layout_network(
@@ -115,7 +66,7 @@ def evaluate_layout_network(
     dataset = dataloader.dataset
 
     # evaluate the network
-    avg_loss, predictions, labels = evaluate_network(network, dataloader, device=device)
+    embedding_vals, predictions, labels = evaluate_network(network, dataloader, device=device)
 
     # split the predictions and labels according to the files
     split_predictions = np.split(predictions, dataset.offsets[:-1])
@@ -151,7 +102,8 @@ def evaluate_layout_network(
             file_list=np.array([str(f) for f in dataset.file_list]),
             kendalls=np.array(kendalls),
             rankings=np.array(rankings, dtype=object),
+            embedding_vals=embedding_vals,
         )
 
     # return the average loss and Kendall's Tau
-    return avg_loss, avg_kendall
+    return avg_kendall

@@ -191,6 +191,8 @@ def train_network(rank, kwargs):
             pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         else:
             pbar = train_dataloader
+        runtimes_train = []
+        embeddings_train = []
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to GPU
             features = features.to(rank)
@@ -198,8 +200,12 @@ def train_network(rank, kwargs):
             edge_index = edge_index.to(rank)
 
             # predict the runtimes
-            pred_runtimes = network(features, edge_index, lengths)
+            graph_emb, pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
+
+            # get the embeddings and runtimes
+            runtimes_train.append(runtimes.cpu().detach().numpy())
+            embeddings_train.append(graph_emb.cpu().detach().numpy())
 
             # backprop
             optimizer.zero_grad()
@@ -233,9 +239,15 @@ def train_network(rank, kwargs):
         if rank == 0:
             logger.info("Saving the model")
             torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
+            logger.info("Saving the embeddings and runtimes")
+            np.savez(
+                save_path.joinpath(f"{run_name}_predictions_{epoch=}"),
+                embeddings=np.concatenate(embeddings_train, axis=1),
+                runtimes=np.concatenate(runtimes_train, axis=0),
+            )
 
         logger.info("Validating the network")
-        avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+        avg_kendall = evaluation.evaluate_layout_network(
             network,
             val_dataloader,
             save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_val.npz"),
@@ -247,12 +259,10 @@ def train_network(rank, kwargs):
         dist.all_reduce(total_avg_kendall, op=dist.ReduceOp.SUM, async_op=False)
         avg_kendall = total_avg_kendall.item()
         logger.info(f"Average kendall for epoch {epoch} (global): {avg_kendall}")
-        if rank == 0:
-            wandb.log({"val_loss": avg_loss, "val_avg_kendall": avg_kendall}, commit=False)
 
         # test the network
         logger.info("Testing the network")
-        avg_loss, avg_kendall = evaluation.evaluate_layout_network(
+        avg_kendall = evaluation.evaluate_layout_network(
             network,
             test_dataloader,
             save_path.joinpath(f"{run_name}_{rank=}_{epoch=}_test.npz"),
@@ -266,9 +276,10 @@ def train_network(rank, kwargs):
         logger.info(f"Average kendall for epoch {epoch} (global): {avg_kendall}")
 
         # reshuffle the dataset
-        logger.info("Loading new configs...")
-        train_dataset.load_new_configs()
-        train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
+        if kwargs["n_configs_per_file"] is not None and epoch < kwargs["epochs"] - 1:
+            logger.info("Loading new configs...")
+            train_dataset.load_new_configs()
+            train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
     # save the model
     if rank == 0:
@@ -316,7 +327,7 @@ def train_network(rank, kwargs):
     help="The list size to use for the training (number of samples per graph in the batch)",
 )
 @click.option("--weight_decay", type=float, default=0.0, help="The weight decay to use for training")
-@click.option("--n_configs_per_file", type=int, default=512, help="The number of configs to read per file")
+@click.option("--n_configs_per_file", type=int, default=None, help="The number of configs to read per file")
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
 @click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps per epoch")
 def main(**kwargs):

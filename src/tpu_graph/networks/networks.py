@@ -348,4 +348,4 @@ class TPUGraphNetwork(nn.Module):
         # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
 
-        return torch.squeeze(runtimes.transpose(0, 1), dim=-1)
+        return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
