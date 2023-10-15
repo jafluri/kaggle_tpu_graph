@@ -11,12 +11,12 @@ import torch.multiprocessing as mp
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConv, GPSConv
+from tpu_graph.networks import TPUGraphNetwork, SAGEConv  # , GPSConv
 
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
 from tqdm import tqdm
-
+import datetime
 import wandb
 
 
@@ -30,7 +30,7 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -133,7 +133,10 @@ def train_network(rank, kwargs):
     # )
     message_network = nn.Sequential(
         SAGEConv(256, 128),
-        GPSConv(128, 128),
+        # GPSConv(128, 128),
+        # GPSConv(128, 128),
+        SAGEConv(128, 128),
+        SAGEConv(128, 128),
         SAGEConv(128, 128),
     )
     projection_network = nn.Linear(128, 1)
@@ -150,9 +153,11 @@ def train_network(rank, kwargs):
     network = DDP(network, device_ids=[rank])
 
     # restore the model if necessary
-    if kwargs["restore_path"] is not None and rank == 0:
+    if kwargs["restore_path"] is not None:
         logger.info("Restoring the model")
-        network.load_state_dict(torch.load(kwargs["restore_path"]))
+        # configure map_location properly
+        map_location = {"cuda:%d" % 0: "cuda:%d" % rank}
+        network.load_state_dict(torch.load(kwargs["restore_path"], map_location=map_location))
 
     # get the optimizer
     optimizer = optim.Adam(network.parameters(), lr=kwargs["learning_rate"], weight_decay=kwargs["weight_decay"])
