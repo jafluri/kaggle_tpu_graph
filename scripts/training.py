@@ -11,7 +11,7 @@ import torch.multiprocessing as mp
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConv  # , GPSConv
+from tpu_graph.networks import TPUGraphNetwork, SAGEConv, GPSConv
 
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseDCGHingeLoss
@@ -30,7 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -58,6 +59,7 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
+            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -134,9 +136,9 @@ def train_network(rank, kwargs):
     message_network = nn.Sequential(
         SAGEConv(256, 128),
         # GPSConv(128, 128),
-        # GPSConv(128, 128),
-        SAGEConv(128, 128),
-        SAGEConv(128, 128),
+        GPSConv(128, 128),
+        # SAGEConv(128, 128),
+        # SAGEConv(128, 128),
         SAGEConv(128, 128),
     )
     projection_network = nn.Linear(128, 1)
@@ -244,12 +246,12 @@ def train_network(rank, kwargs):
         if rank == 0:
             logger.info("Saving the model")
             torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
-            logger.info("Saving the embeddings and runtimes")
-            np.savez(
-                save_path.joinpath(f"{run_name}_predictions_{epoch=}"),
-                embeddings=np.concatenate(embeddings_train, axis=1),
-                runtimes=np.concatenate(runtimes_train, axis=0),
-            )
+        logger.info("Saving the embeddings and runtimes")
+        np.savez(
+            save_path.joinpath(f"{run_name}_predictions_{rank=}_{epoch=}"),
+            embeddings=np.concatenate(embeddings_train, axis=1),
+            runtimes=np.concatenate(runtimes_train, axis=0),
+        )
 
         logger.info("Validating the network")
         avg_kendall = evaluation.evaluate_layout_network(
