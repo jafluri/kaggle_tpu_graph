@@ -178,6 +178,10 @@ class RetentiveAttention(nn.Module):
         query = self.query_embedding(x)
         values = self.value_embedding(x)
 
+        # use activation
+        key = nn.functional.elu(key) + 1
+        query = nn.functional.elu(query) + 1
+
         # reshape the key (list, graph, key_dim * n_heads) -> (graph, list, n_heads, key_dim)
         key = key.reshape(x.shape[0], x.shape[1], -1, self.key_dim).transpose(0, 1)
 
