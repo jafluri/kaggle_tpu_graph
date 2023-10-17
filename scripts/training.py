@@ -30,8 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -121,7 +121,7 @@ def train_network(rank, kwargs):
         num_shards=kwargs["world_size"],
         shard_id=rank,
     )
-    test_dataloader = test_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
+    test_dataloader = test_dataset.get_dataloader(batch_size=16, shuffle=False, drop_last=False)
 
     # we build a super simple network for starters
     logger.info("Building the network")
@@ -134,7 +134,7 @@ def train_network(rank, kwargs):
     # )
     message_network = nn.Sequential(
         SAGEConv(256, 128),
-        # GPSConv(128, 128),
+        GPSConv(128, 128),
         GPSConv(128, 128),
         # SAGEConv(128, 128),
         # SAGEConv(128, 128),
@@ -197,8 +197,6 @@ def train_network(rank, kwargs):
             pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
         else:
             pbar = train_dataloader
-        runtimes_train = []
-        embeddings_train = []
         for batch_idx, (features, lengths, runtimes, edge_index) in enumerate(pbar):
             # to GPU
             features = features.to(rank)
@@ -206,12 +204,8 @@ def train_network(rank, kwargs):
             edge_index = edge_index.to(rank)
 
             # predict the runtimes
-            graph_emb, pred_runtimes = network(features, edge_index, lengths)
+            _, pred_runtimes = network(features, edge_index, lengths)
             loss = torch.mean(loss_fn(pred_runtimes, runtimes))
-
-            # get the embeddings and runtimes
-            runtimes_train.append(runtimes.cpu().detach().numpy())
-            embeddings_train.append(graph_emb.cpu().detach().numpy())
 
             # backprop
             optimizer.zero_grad()
@@ -245,12 +239,6 @@ def train_network(rank, kwargs):
         if rank == 0:
             logger.info("Saving the model")
             torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
-        logger.info("Saving the embeddings and runtimes")
-        np.savez(
-            save_path.joinpath(f"{run_name}_predictions_{rank=}_{epoch=}"),
-            embeddings=np.concatenate(embeddings_train, axis=1),
-            runtimes=np.concatenate(runtimes_train, axis=0),
-        )
 
         logger.info("Validating the network")
         avg_kendall = evaluation.evaluate_layout_network(
@@ -265,6 +253,8 @@ def train_network(rank, kwargs):
         dist.all_reduce(total_avg_kendall, op=dist.ReduceOp.SUM, async_op=False)
         avg_kendall = total_avg_kendall.item()
         logger.info(f"Average kendall for epoch {epoch} (global): {avg_kendall}")
+        if rank == 0:
+            wandb.log({"val_avg_kendall": avg_kendall})
 
         # test the network
         logger.info("Testing the network")
