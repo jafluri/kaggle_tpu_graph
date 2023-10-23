@@ -189,6 +189,7 @@ def train_network(rank, kwargs):
     # start the training loop
     logger.info("Starting the training loop")
     for epoch in range(kwargs["epochs"]):
+        network.train()
         if rank == 0:
             logger.info(f"Starting epoch {epoch}")
             pbar = tqdm(train_dataloader, postfix={"loss": 0}, total=total)
@@ -238,6 +239,7 @@ def train_network(rank, kwargs):
             torch.save(network.state_dict(), save_path.joinpath(f"{run_name}_{epoch=}.pt"))
 
         logger.info("Validating the network")
+        network.eval()
         avg_kendall = evaluation.evaluate_layout_network(
             network,
             val_dataloader,

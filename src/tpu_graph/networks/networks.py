@@ -314,7 +314,7 @@ class TPUGraphNetwork(nn.Module):
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
-        self.dropout = nn.Dropout1d(dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
         self,
@@ -346,7 +346,10 @@ class TPUGraphNetwork(nn.Module):
         emb_features = self.embedding_layer(features)
 
         # apply dropout
-        emb_features = self.dropout(emb_features)
+        _, graph_dim, _ = emb_features.shape
+        mask = torch.ones((1, graph_dim, 1), device=emb_features.device)
+        mask = self.dropout(mask)
+        emb_features = emb_features * mask
 
         # apply the transformer networks
         graph_embedding, _ = self.message_network((emb_features, connection_matrix))
