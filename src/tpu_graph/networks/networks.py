@@ -178,6 +178,10 @@ class RetentiveAttention(nn.Module):
         query = self.query_embedding(x)
         values = self.value_embedding(x)
 
+        # activation
+        key = nn.functional.elu(key) + 1
+        query = nn.functional.elu(query) + 1
+
         # reshape the key (list, graph, key_dim * n_heads) -> (graph, list, n_heads, key_dim)
         key = key.reshape(x.shape[0], x.shape[1], -1, self.key_dim).transpose(0, 1)
 
@@ -290,6 +294,7 @@ class TPUGraphNetwork(nn.Module):
         message_network: nn.Sequential,
         projection_network: nn.Module,
         op_embedding_dim: int = 32,
+        dropout: float = 0.25,
         **kwargs,
     ):
         """
@@ -309,6 +314,7 @@ class TPUGraphNetwork(nn.Module):
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
+        self.dropout = nn.Dropout1d(dropout)
 
     def forward(
         self,
@@ -338,6 +344,9 @@ class TPUGraphNetwork(nn.Module):
 
         # embed the first column
         emb_features = self.embedding_layer(features)
+
+        # apply dropout
+        emb_features = self.dropout(emb_features)
 
         # apply the transformer networks
         graph_embedding, _ = self.message_network((emb_features, connection_matrix))
