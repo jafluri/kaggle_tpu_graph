@@ -321,12 +321,14 @@ class TPUGraphNetwork(nn.Module):
         features: torch.Tensor,
         edge_index: torch.Tensor,
         lengths: list[int],
+        drop_mask: torch.Tensor | None = None,
     ):
         """
         Forward pass of the network
         :param features: The input features (multiple graphs concatenated)
         :param edge_index: The indices of the connection matrix
         :param lengths: The lengths of the individual graphs
+        :param drop_mask: The dropout mask to use for the nodes (optional), if None, random dropout is used
         :return: The predicted runtime in nanoseconds
         """
 
@@ -346,10 +348,11 @@ class TPUGraphNetwork(nn.Module):
         emb_features = self.embedding_layer(features)
 
         # apply dropout
-        _, graph_dim, _ = emb_features.shape
-        mask = torch.ones((1, graph_dim, 1), device=emb_features.device)
-        mask = self.dropout(mask)
-        emb_features = emb_features * mask
+        if drop_mask is None:
+            _, graph_dim, _ = emb_features.shape
+            drop_mask = torch.ones((1, graph_dim, 1), device=emb_features.device)
+            drop_mask = self.dropout(drop_mask)
+        emb_features = emb_features * drop_mask
 
         # apply the transformer networks
         graph_embedding, _ = self.message_network((emb_features, connection_matrix))
