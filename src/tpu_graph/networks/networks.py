@@ -244,7 +244,8 @@ class SAGEConvV3(nn.Module):
         connection_matrix_in, connection_matrix_out = connection_matrix
 
         if not self.in_and_out:
-            return self.sage_conv((x, connection_matrix_in))
+            output, _ = self.sage_conv((x, connection_matrix_in))
+            return output, connection_matrix
 
         # the normal projection
         projection = self.linear(x)

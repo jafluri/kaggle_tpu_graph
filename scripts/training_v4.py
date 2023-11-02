@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import sys
@@ -11,12 +12,11 @@ import torch.multiprocessing as mp
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConv, SAGEConvV3
-
+from tpu_graph.networks import TPUGraphNetwork, SAGEConvV3
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
 from tqdm import tqdm
-import datetime
+
 import wandb
 
 
@@ -136,7 +136,7 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConv(256, 156, in_and_out=False),
+        SAGEConvV3(256, 156, in_and_out=False),
         SAGEConvV3(156, 128),
         SAGEConvV3(128, 128),
     )
