@@ -151,7 +151,7 @@ def train_network(rank, kwargs):
         projection_network=projection_network,
         dropout=kwargs["dropout"],
         undirected=False,
-        normalize_connection_matrix=False,
+        in_and_out=True,
     )
 
     # network to GPU
