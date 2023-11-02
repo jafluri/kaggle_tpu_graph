@@ -85,8 +85,6 @@ class EmbeddingInputLayerV2(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(full_dim, full_dim, bias=True),
             nn.SiLU(),
-            nn.Linear(full_dim, full_dim, bias=True),
-            nn.SiLU(),
             nn.Linear(full_dim, out_channels, bias=True),
             nn.SiLU(),
             nn.LayerNorm(out_channels),

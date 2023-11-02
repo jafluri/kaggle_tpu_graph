@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE
+from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 from zipfile import ZipFile
@@ -447,6 +447,11 @@ class LayoutDataset(Dataset):
 
         # log some of the features
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
+
+        # add the mod of the dim features
+        node_feat = np.concatenate([node_feat, np.mod(node_feat[:, DIM_FEATURES], 128) / 128.0], axis=1)
+        # replace the dim features with the true divison
+        node_feat[:, DIM_FEATURES] = np.floor(node_feat[:, DIM_FEATURES] / 1280)
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe], axis=1)

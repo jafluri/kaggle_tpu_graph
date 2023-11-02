@@ -131,7 +131,7 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 + 30
+    input_dim = 159 + 30 + 37
     # the position embedding
     input_dim += 16
 
@@ -151,6 +151,7 @@ def train_network(rank, kwargs):
         message_network=message_network,
         projection_network=projection_network,
         dropout=kwargs["dropout"],
+        embedding_version="v2",
     )
 
     # network to GPU
