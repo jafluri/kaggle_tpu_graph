@@ -508,9 +508,9 @@ class TPUGraphNetwork(nn.Module):
             values = torch.ones(edge_index.shape[1]).to(edge_index.device)
             if self.in_and_out:
                 norm_in = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-                norm_in = norm_in.clamp(min=1.0)[edge_index[0]]
+                norm_in = norm_in.clamp(min=1.0)[:, None]
                 norm_out = torch_scatter.scatter_sum(values, index=edge_index[1], dim=0, dim_size=n_nodes)
-                norm_out = norm_out.clamp(min=1.0)[edge_index[1]]
+                norm_out = norm_out.clamp(min=1.0)[:, None]
                 connection_matrix = (torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes)), norm_in, norm_out)
             else:
                 norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
