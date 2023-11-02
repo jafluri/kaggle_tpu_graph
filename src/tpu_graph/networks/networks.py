@@ -56,6 +56,62 @@ class EmbeddingInputLayer(nn.Module):
         return x
 
 
+class EmbeddingInputLayerV2(nn.Module):
+    """
+    This is just a layer that splits of the first column of the input and embeds it
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, emb_size: int = 32, num_embeddings: int = 128):
+        """
+        Inits the layer
+        :param in_channels: The number of input channels without the embedding
+        :param out_channels: The number of output channels after the projection
+        :param emb_size: The size of the embedding
+        :param num_embeddings: The number of embeddings
+        """
+
+        # this line is mandatory for all subclasses
+        super().__init__()
+
+        # save the attributes
+        self.emb_size = emb_size
+        self.num_embeddings = num_embeddings
+
+        # init the embedding
+        self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
+
+        # the other layers
+        full_dim = in_channels + emb_size - 1
+        self.mlp = nn.Sequential(
+            nn.Linear(full_dim, full_dim, bias=True),
+            nn.SiLU(),
+            nn.Linear(full_dim, full_dim, bias=True),
+            nn.SiLU(),
+            nn.Linear(full_dim, out_channels, bias=True),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass of the layer
+        :param x: The input tensor
+        :return: The input tensor with the first column embedded
+        """
+
+        # get the first column and convert to int
+        op_code = x[..., 0].long()
+
+        # embed the first column
+        embedding = self.emb(op_code)
+        x = torch.concatenate([embedding, x[..., 1:]], dim=-1)
+
+        # project
+        x = self.mlp(x)
+
+        return x
+
+
 class SAGEConv(nn.Module):
     """
     Implements a simple SAGE convolution
@@ -453,6 +509,7 @@ class TPUGraphNetwork(nn.Module):
         message_network: nn.Sequential,
         projection_network: nn.Module,
         op_embedding_dim: int = 32,
+        embedding_version: str = "v1",
         dropout: float = 0.25,
         undirected: bool = False,
         in_and_out: bool = False,
@@ -478,7 +535,10 @@ class TPUGraphNetwork(nn.Module):
         # save attributes
         self.undirected = undirected
         self.in_and_out = in_and_out
-        self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
+        if embedding_version == "v1":
+            self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
+        elif embedding_version == "v2":
+            self.embedding_layer = EmbeddingInputLayerV2(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
         self.dropout = nn.Dropout(dropout)
