@@ -219,13 +219,14 @@ class SAGEConvV3(nn.Module):
 
         # init the layers
         self.linear = nn.Linear(in_channels, out_channels, bias=True)
-        self.agg_linear = nn.Linear(2 * in_channels, out_channels, bias=False)
+        self.agg_linear_in = nn.Linear(in_channels, out_channels, bias=True)
+        self.agg_linear_out = nn.Linear(in_channels, out_channels, bias=True)
         self.silu = nn.SiLU()
-        self.layernorm = nn.LayerNorm(out_channels)
+        self.layernorm = nn.LayerNorm(3 * out_channels)
 
         # for the output MLP with layer norm
         self.mlp_out = nn.Sequential(
-            nn.Linear(out_channels, out_channels),
+            nn.Linear(3 * out_channels, out_channels),
             nn.SiLU(),
             nn.LayerNorm(out_channels),
         )
@@ -250,21 +251,20 @@ class SAGEConvV3(nn.Module):
         x = x.transpose(0, 1).reshape(graph_dim, -1)
 
         # apply the connection matrix
-        in_coming = torch.sparse.mm(connection_matrix, x)
-        out_going = torch.sparse.mm(connection_matrix.transpose(0, 1), x)
+        in_coming = torch.sparse.mm(connection_matrix, x) / torch.sparse.sum(connection_matrix, dim=1)
+        out_going = torch.sparse.mm(connection_matrix.transpose(0, 1), x) / torch.sparse.sum(connection_matrix, dim=0)
 
         # back to (list, graph, inp)
         in_coming = in_coming.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
         out_going = out_going.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
 
-        # combine
-        x = torch.concatenate([in_coming, out_going], dim=-1)
-
         # the aggregation projection
-        agg_projection = self.agg_linear(x)
+        agg_projection_in = self.agg_linear_in(in_coming)
+        agg_projection_out = self.agg_linear_out(out_going)
 
         # the output
-        output = self.silu(projection + agg_projection)
+        output = torch.concatenate([projection, agg_projection_in, agg_projection_out], dim=-1)
+        output = self.silu(output)
         output = self.layernorm(output)
 
         # apply the MLP
@@ -449,6 +449,7 @@ class TPUGraphNetwork(nn.Module):
         op_embedding_dim: int = 32,
         dropout: float = 0.25,
         undirected: bool = False,
+        normalize_connection_matrix: bool = True,
         **kwargs,
     ):
         """
@@ -460,6 +461,7 @@ class TPUGraphNetwork(nn.Module):
         :param op_embedding_dim: The dimension of the op embedding
         :param dropout: The dropout to use
         :param undirected: If True, the connection matrix is symmetrized
+        :param normalize_connection_matrix: If True, the connection matrix is normalized
         :param kwargs: Additional arguments for the super class
         """
 
@@ -467,7 +469,8 @@ class TPUGraphNetwork(nn.Module):
         super().__init__(**kwargs)
 
         # save attributes
-        self.unidrected = undirected
+        self.undirected = undirected
+        self.normalize_connection_matrix = normalize_connection_matrix
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
@@ -495,15 +498,16 @@ class TPUGraphNetwork(nn.Module):
         # build the connection matrix
         with torch.no_grad():
             # add the reverse edges if necessary
-            if self.unidrected:
+            if self.undirected:
                 edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=-1)
 
             # create the connection matrix
             n_nodes = features.shape[1]
             values = torch.ones(edge_index.shape[1]).to(edge_index.device)
-            norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-            norm = norm.clamp(min=1.0)[edge_index[0]]
-            values = values / norm
+            if self.normalize_connection_matrix:
+                norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
+                norm = norm.clamp(min=1.0)[edge_index[0]]
+                values = values / norm
             connection_matrix = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
 
         # embed the first column
