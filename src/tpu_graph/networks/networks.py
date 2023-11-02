@@ -251,12 +251,14 @@ class SAGEConvV3(nn.Module):
         x = x.transpose(0, 1).reshape(graph_dim, -1)
 
         # apply the connection matrix
-        in_coming = torch.sparse.mm(connection_matrix, x) / torch.sparse.sum(connection_matrix, dim=1).to_dense().clamp(
-            min=1.0
-        )
-        out_going = torch.sparse.mm(connection_matrix.transpose(0, 1), x) / torch.sparse.sum(
-            connection_matrix, dim=0
-        ).to_dense().clamp(min=1.0)
+        in_coming = torch.sparse.mm(connection_matrix, x)
+        out_going = torch.sparse.mm(connection_matrix.transpose(0, 1), x)
+        # normalize
+        with torch.no_grad():
+            norm_in = torch.sparse.sum(connection_matrix, dim=1).to_dense().clamp(min=1.0)
+            norm_out = torch.sparse.sum(connection_matrix, dim=0).to_dense().clamp(min=1.0)
+        in_coming = in_coming / norm_in[:, None]
+        out_going = out_going / norm_out[:, None]
 
         # back to (list, graph, inp)
         in_coming = in_coming.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
