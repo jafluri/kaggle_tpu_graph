@@ -136,7 +136,7 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConv(256, 156),
+        SAGEConv(256, 156, in_and_out=False),
         SAGEConvV3(156, 128),
         SAGEConvV3(128, 128),
     )

@@ -199,15 +199,12 @@ class SAGEConvV3(nn.Module):
     Implements a simple SAGE convolution
     """
 
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-    ):
+    def __init__(self, in_channels: int, out_channels: int, in_and_out: bool = True):
         """
         Inits the layer
         :param in_channels: Number of input channels
         :param out_channels: Number of output channels
+        :param in_and_out: If True, use the in and out connection matrices separately
         """
 
         # init the super class
@@ -216,20 +213,24 @@ class SAGEConvV3(nn.Module):
         # save attributes
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.in_and_out = in_and_out
 
-        # init the layers
-        self.linear = nn.Linear(in_channels, out_channels, bias=True)
-        self.agg_linear_in = nn.Linear(in_channels, out_channels, bias=True)
-        self.agg_linear_out = nn.Linear(in_channels, out_channels, bias=True)
-        self.silu = nn.SiLU()
-        self.layernorm = nn.LayerNorm(3 * out_channels)
+        if in_and_out:
+            # init the layers
+            self.linear = nn.Linear(in_channels, out_channels, bias=True)
+            self.agg_linear_in = nn.Linear(in_channels, out_channels, bias=True)
+            self.agg_linear_out = nn.Linear(in_channels, out_channels, bias=True)
+            self.silu = nn.SiLU()
+            self.layernorm = nn.LayerNorm(3 * out_channels)
 
-        # for the output MLP with layer norm
-        self.mlp_out = nn.Sequential(
-            nn.Linear(3 * out_channels, out_channels),
-            nn.SiLU(),
-            nn.LayerNorm(out_channels),
-        )
+            # for the output MLP with layer norm
+            self.mlp_out = nn.Sequential(
+                nn.Linear(3 * out_channels, out_channels),
+                nn.SiLU(),
+                nn.LayerNorm(out_channels),
+            )
+        else:
+            self.sage_conv = SAGEConv(in_channels, out_channels)
 
     def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]):
         """
@@ -241,6 +242,9 @@ class SAGEConvV3(nn.Module):
         # unpack the input tensors
         x, connection_matrix = inp_tensors
         connection_matrix_in, connection_matrix_out = connection_matrix
+
+        if not self.in_and_out:
+            return self.sage_conv((x, connection_matrix_in))
 
         # the normal projection
         projection = self.linear(x)
