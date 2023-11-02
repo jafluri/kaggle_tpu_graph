@@ -120,6 +120,159 @@ class SAGEConv(nn.Module):
         return output, connection_matrix
 
 
+class SAGEConvV2(nn.Module):
+    """
+    Implements a simple SAGE convolution
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+    ):
+        """
+        Inits the layer
+        :param in_channels: Number of input channels
+        :param out_channels: Number of output channels
+        """
+
+        # init the super class
+        super().__init__()
+
+        # save attributes
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        # init the layers
+        self.linear = nn.Linear(in_channels, out_channels, bias=True)
+        self.agg_linear = nn.Linear(in_channels, out_channels, bias=False)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels)
+
+        # for the output MLP with layer norm
+        self.mlp_out = nn.Sequential(
+            nn.Linear(out_channels, out_channels),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.Tensor]):
+        """
+        Forward pass of the layer
+        :param inp_tensors: The input tensors, a tuple of (features, connection_matrix)
+        :return: The output of the layer and the connection matrix
+        """
+
+        # unpack the input tensors
+        x, connection_matrix = inp_tensors
+
+        # the normal projection
+        projection = self.linear(x)
+
+        # get the input dimension
+        list_dim, graph_dim, inp_dim = x.shape
+
+        # (list, graph, inp) -> (graph, inp * list)
+        x = x.transpose(0, 1).reshape(graph_dim, -1)
+
+        # apply the connection matrix
+        x = torch.sparse.mm(connection_matrix, x)
+
+        # back to (list, graph, inp)
+        x = x.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
+
+        # the aggregation projection
+        agg_projection = self.agg_linear(x)
+
+        # the output
+        output = self.silu(projection + agg_projection)
+        output = self.layernorm(output)
+
+        # apply the MLP
+        output = self.mlp_out(output)
+
+        return output, connection_matrix
+
+
+class SAGEConvV3(nn.Module):
+    """
+    Implements a simple SAGE convolution
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+    ):
+        """
+        Inits the layer
+        :param in_channels: Number of input channels
+        :param out_channels: Number of output channels
+        """
+
+        # init the super class
+        super().__init__()
+
+        # save attributes
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        # init the layers
+        self.linear = nn.Linear(in_channels, out_channels, bias=True)
+        self.agg_linear = nn.Linear(2 * in_channels, out_channels, bias=False)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels)
+
+        # for the output MLP with layer norm
+        self.mlp_out = nn.Sequential(
+            nn.Linear(out_channels, out_channels),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.Tensor]):
+        """
+        Forward pass of the layer
+        :param inp_tensors: The input tensors, a tuple of (features, connection_matrix)
+        :return: The output of the layer and the connection matrix
+        """
+
+        # unpack the input tensors
+        x, connection_matrix = inp_tensors
+
+        # the normal projection
+        projection = self.linear(x)
+
+        # get the input dimension
+        list_dim, graph_dim, inp_dim = x.shape
+
+        # (list, graph, inp) -> (graph, inp * list)
+        x = x.transpose(0, 1).reshape(graph_dim, -1)
+
+        # apply the connection matrix
+        in_coming = torch.sparse.mm(connection_matrix, x)
+        out_going = torch.sparse.mm(connection_matrix.transpose(0, 1), x)
+
+        # back to (list, graph, inp)
+        in_coming = in_coming.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
+        out_going = out_going.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
+
+        # combine
+        x = torch.concatenate([in_coming, out_going], dim=-1)
+
+        # the aggregation projection
+        agg_projection = self.agg_linear(x)
+
+        # the output
+        output = self.silu(projection + agg_projection)
+        output = self.layernorm(output)
+
+        # apply the MLP
+        output = self.mlp_out(output)
+
+        return output, connection_matrix
+
+
 class RetentiveAttention(nn.Module):
     """
     Implements a retentive attention layer
@@ -295,6 +448,7 @@ class TPUGraphNetwork(nn.Module):
         projection_network: nn.Module,
         op_embedding_dim: int = 32,
         dropout: float = 0.25,
+        undirected: bool = False,
         **kwargs,
     ):
         """
@@ -304,6 +458,8 @@ class TPUGraphNetwork(nn.Module):
         :param message_network: A network that performs the message passing
         :param projection_network: A network that projects the output of the transformer network to the output dimension
         :param op_embedding_dim: The dimension of the op embedding
+        :param dropout: The dropout to use
+        :param undirected: If True, the connection matrix is symmetrized
         :param kwargs: Additional arguments for the super class
         """
 
@@ -311,6 +467,7 @@ class TPUGraphNetwork(nn.Module):
         super().__init__(**kwargs)
 
         # save attributes
+        self.unidrected = undirected
         self.embedding_layer = EmbeddingInputLayer(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         self.message_network = message_network
         self.projection_network = projection_network
@@ -337,6 +494,11 @@ class TPUGraphNetwork(nn.Module):
 
         # build the connection matrix
         with torch.no_grad():
+            # add the reverse edges if necessary
+            if self.unidrected:
+                edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=-1)
+
+            # create the connection matrix
             n_nodes = features.shape[1]
             values = torch.ones(edge_index.shape[1]).to(edge_index.device)
             norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
