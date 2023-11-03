@@ -173,13 +173,13 @@ class EmbeddingInputLayerV3(nn.Module):
         embedding = self.emb(op_code)
 
         # project the configs
-        configs = self.projections(configs)
-        configs = nn.functional.gelu(configs)
-        list_dim, graph_dim, _ = configs.shape
-        configs = configs.reshape(list_dim, graph_dim, self.n_features, self.n_projections)
+        configs_emb = self.projections(configs)
+        configs_emb = nn.functional.gelu(configs_emb)
+        list_dim, graph_dim, _ = configs_emb.shape
+        configs_emb = configs_emb.reshape(list_dim, graph_dim, self.n_features, self.n_projections)
 
         # project the features
-        weights = torch.einsum("lgf,lgfp->lgp", features, configs)
+        weights = torch.einsum("lgf,lgfp->lgp", features, configs_emb)
 
         # concatenate
         x = torch.concatenate([embedding, features, configs, weights], dim=-1)
