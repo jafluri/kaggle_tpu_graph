@@ -179,7 +179,7 @@ class EmbeddingInputLayerV3(nn.Module):
         configs = configs.reshape(list_dim, graph_dim, self.n_features, self.n_projections)
 
         # project the features
-        weights = torch.matmul(features, configs)
+        weights = torch.einsum("lgf,lgfp->lgp", features, configs)
 
         # concatenate
         x = torch.concatenate([embedding, features, configs, weights], dim=-1)

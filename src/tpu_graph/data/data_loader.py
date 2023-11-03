@@ -448,8 +448,8 @@ class LayoutDataset(Dataset):
         # log some of the features
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
-        # add the mod of the dim features
-        node_feat = np.concatenate([node_feat, np.mod(node_feat[:, DIM_FEATURES], 128) / 128.0], axis=1)
+        # add the mod of the dim features, we add 127 to make 1 the best and 0 the worst
+        node_feat = np.concatenate([node_feat, np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0], axis=1)
         # replace the dim features with the true divison
         node_feat[:, DIM_FEATURES] = np.floor(node_feat[:, DIM_FEATURES] / 1280)
 
