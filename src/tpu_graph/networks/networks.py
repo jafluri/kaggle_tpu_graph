@@ -122,7 +122,7 @@ class EmbeddingInputLayerV3(nn.Module):
         emb_size: int = 32,
         num_embeddings: int = 128,
         n_configs: int = 18,
-        n_projections: int = 16,
+        n_projections: int = 8,
     ):
         """
         Inits the layer
