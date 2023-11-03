@@ -167,7 +167,7 @@ class EmbeddingInputLayerV3(nn.Module):
 
         # get the first column and convert to int
         op_code, features, configs = torch.split(x, [1, self.n_features, self.n_configs], dim=-1)
-        op_code = op_code.long()
+        op_code = torch.squeeze(op_code, dim=-1).long()
 
         # embed the first column
         embedding = self.emb(op_code)
