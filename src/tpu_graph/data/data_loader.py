@@ -448,13 +448,16 @@ class LayoutDataset(Dataset):
         # log some of the features
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
-        # add the mod of the dim features, we add 127 to make 1 the best and 0 the worst
-        node_feat = np.concatenate([node_feat, np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0], axis=1)
-        # replace the dim features with the true divison, divide by 10 to avoid too large numbers
-        node_feat[:, DIM_FEATURES] = np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0
+        # we do everythin mod 128 (the TPU register length)
+        dim_features = np.concatenate(
+            [np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0, np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0],
+            axis=1,
+        )
+        # we log the original dim features
+        node_feat[:, DIM_FEATURES] = np.log(node_feat[:, DIM_FEATURES] + 1)
 
         # add node_feat and pe
-        node_feat = np.concatenate([node_feat, pe], axis=1)
+        node_feat = np.concatenate([node_feat, pe, dim_features], axis=1)
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0

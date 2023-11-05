@@ -131,7 +131,7 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 + 30 + 37
+    input_dim = 159 + 30 + 2 * 37
     # the position embedding
     input_dim += 16
 
