@@ -445,16 +445,13 @@ class LayoutDataset(Dataset):
         pe = data["pe"]
         edge_index = data["edge_index"]
 
-        # log some of the features
-        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
-
         # we do everythin mod 128 (the TPU register length)
         dim_features = np.concatenate(
             [np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0, np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0],
             axis=1,
         )
-        # we log the original dim features
-        node_feat[:, DIM_FEATURES] = np.log(node_feat[:, DIM_FEATURES] + 1)
+        # log some of the features (this can include dim features)
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, pe, dim_features], axis=1)
