@@ -137,7 +137,6 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConvV4(256, 156),
         SAGEConvV4(156, 128),
         GPSConvV2(128, 128),
         GPSConvV2(128, 128),
@@ -147,7 +146,7 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetwork(
         in_channels=input_dim,
-        out_channels=256,
+        out_channels=156,
         message_network=message_network,
         projection_network=projection_network,
         dropout=kwargs["dropout"],
