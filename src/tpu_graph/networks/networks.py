@@ -999,12 +999,6 @@ class TPUGraphNetwork(nn.Module):
         else:
             raise ValueError(f"Unknown embedding version {embedding_version}")
         self.message_network = message_network
-        self.last_mlp = nn.Sequential(
-            nn.Linear(out_channels, out_channels),
-            nn.SiLU(),
-            nn.Linear(out_channels, out_channels),
-            nn.SiLU(),
-        )
         self.projection_network = projection_network
         self.dropout = nn.Dropout(dropout)
         self.add_lengths = add_lengths
@@ -1068,12 +1062,8 @@ class TPUGraphNetwork(nn.Module):
             graph_embedding, *_ = self.message_network((emb_features, connection_matrix, lengths))
         else:
             graph_embedding, _ = self.message_network((emb_features, connection_matrix))
-
-        # final MLP
-        graph_embedding = self.last_mlp(graph_embedding)
-
         # now we can apply the weights
-        graph_embedding, _ = torch_scatter.scatter_max(graph_embedding, index=index, dim=1)
+        graph_embedding = torch_scatter.scatter_sum(graph_embedding, index=index, dim=1)
 
         # now we do the final projection
         runtimes = self.projection_network(graph_embedding)
