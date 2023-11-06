@@ -11,7 +11,7 @@ import torch.multiprocessing as mp
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConvV3, GPSConvV2
+from tpu_graph.networks import TPUGraphNetwork, SAGEConvV4, GPSConvV2
 
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
@@ -137,8 +137,8 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConvV3(256, 156),
-        SAGEConvV3(156, 128),
+        SAGEConvV4(256, 156),
+        SAGEConvV4(156, 128),
         GPSConvV2(128, 128),
         GPSConvV2(128, 128),
         GPSConvV2(128, 128),

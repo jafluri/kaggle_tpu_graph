@@ -6,6 +6,7 @@ from .networks import (
     SAGEConv,
     SAGEConvV2,
     SAGEConvV3,
+    SAGEConvV4,
     RetentiveAttention,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "SAGEConv",
     "SAGEConvV2",
     "SAGEConvV3",
+    "SAGEConvV4",
     "RetentiveAttention",
 ]

@@ -591,6 +591,83 @@ class SAGEConvV3(nn.Module):
         return output, connection_matrix
 
 
+class SAGEConvV4(nn.Module):
+    """
+    Implements a simple SAGE convolution
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, message_dim=32):
+        """
+        Inits the layer
+        :param in_channels: Number of input channels
+        :param out_channels: Number of output channels
+        :param message_dim: The dimension of the messages
+        """
+
+        # init the super class
+        super().__init__()
+
+        # save attributes
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.message_dim = message_dim
+
+        # init the layers
+        self.linear = nn.Linear(in_channels, out_channels, bias=True)
+        self.agg_linear_in = nn.Linear(in_channels, message_dim, bias=True)
+        self.agg_linear_out = nn.Linear(in_channels, message_dim, bias=True)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels + 2 * message_dim)
+
+        # for the output MLP with layer norm
+        self.mlp_out = nn.Sequential(
+            nn.Linear(out_channels + 2 * message_dim, out_channels),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], list[int]]):
+        """
+        Forward pass of the layer
+        :param inp_tensors: The input tensors, a tuple of (features, connection_matrix)
+        :return: The output of the layer and the connection matrix
+        """
+
+        # unpack the input tensors
+        x, connection_matrix, _ = inp_tensors
+        connection_matrix_in, connection_matrix_out = connection_matrix
+
+        # project everything
+        projection = self.linear(x)
+        projection_in = self.agg_linear_in(x)
+        projection_out = self.agg_linear_out(x)
+
+        # get the input dimension
+        list_dim, graph_dim, _ = x.shape
+
+        # (list, graph, inp) -> (graph, inp * list)
+        projection_in = projection_in.transpose(0, 1).reshape(graph_dim, -1)
+        projection_out = projection_out.transpose(0, 1).reshape(graph_dim, -1)
+
+        # apply the connection matrix
+        in_coming = torch.sparse.mm(connection_matrix_in, projection_in)
+        out_going = torch.sparse.mm(connection_matrix_out, projection_out)
+
+        # back to (list, graph, inp)
+        agg_projection_in = in_coming.reshape(graph_dim, list_dim, self.message_dim).transpose(0, 1)
+        agg_projection_out = out_going.reshape(graph_dim, list_dim, self.message_dim).transpose(0, 1)
+
+        # the output
+        output = torch.concatenate([projection, agg_projection_in, agg_projection_out], dim=-1)
+        output = self.silu(output)
+        output = self.layernorm(output)
+
+        # apply the MLP
+        output = self.mlp_out(output)
+
+        return output, connection_matrix
+
+
 class RetentiveAttention(nn.Module):
     """
     Implements a retentive attention layer
