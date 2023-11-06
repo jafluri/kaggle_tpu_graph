@@ -781,7 +781,7 @@ class GPSConv(nn.Module):
         self.layernorm1 = nn.LayerNorm(out_dim)
         self.layernorm2 = nn.LayerNorm(out_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor, list[int]]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -789,11 +789,11 @@ class GPSConv(nn.Module):
         """
 
         # unpack the input tensors
-        x_orig, connection_matrix = inp_tensors
+        x_orig, connection_matrix, lengths = inp_tensors
 
         # apply the layers
-        sage_output, _ = self.sage_conv(inp_tensors)
-        attention_output, _ = self.attention(inp_tensors)
+        sage_output, _ = self.sage_conv((x_orig, connection_matrix))
+        attention_output, _ = self.attention((x_orig, lengths))
 
         # add and project
         x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
@@ -885,6 +885,7 @@ class TPUGraphNetwork(nn.Module):
         dropout: float = 0.25,
         undirected: bool = False,
         in_and_out: bool = False,
+        add_lengths: bool = False,
         **kwargs,
     ):
         """
@@ -898,6 +899,7 @@ class TPUGraphNetwork(nn.Module):
         :param undirected: If True, the connection matrix is symmetrized
         :param in_and_out: If True, The in and out edges connection matrices are calculated separately and are
                            fed as a tuple to the message network
+        :param add_lengths: If True, the lengths of the individual graphs are added to the input
         :param kwargs: Additional arguments for the super class
         """
 
@@ -922,6 +924,7 @@ class TPUGraphNetwork(nn.Module):
         self.message_network = message_network
         self.projection_network = projection_network
         self.dropout = nn.Dropout(dropout)
+        self.add_lengths = add_lengths
 
     def forward(
         self,
@@ -978,8 +981,10 @@ class TPUGraphNetwork(nn.Module):
         emb_features = emb_features * drop_mask
 
         # apply the transformer networks
-        graph_embedding, _ = self.message_network((emb_features, connection_matrix))
-
+        if self.add_lengths:
+            graph_embedding, _ = self.message_network((emb_features, connection_matrix, lengths))
+        else:
+            graph_embedding, _ = self.message_network((emb_features, connection_matrix))
         # now we can apply the weights
         graph_embedding = torch_scatter.scatter_sum(graph_embedding, index=index, dim=1)
 
