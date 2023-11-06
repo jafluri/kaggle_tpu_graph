@@ -106,6 +106,78 @@ class EmbeddingInputLayer(nn.Module):
         return x
 
 
+class EmbeddingInputLayerV2(nn.Module):
+    """
+    This is just a layer that splits of the first column of the input and embeds it
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        emb_size: int = 32,
+        num_embeddings: int = 128,
+        n_configs: int = 18,
+        n_dim_features: int = 74,
+        **kwargs,
+    ):
+        """
+        Inits the layer
+        :param in_channels: The number of input channels without the embedding
+        :param out_channels: The number of output channels after the projection
+        :param emb_size: The size of the embedding
+        :param num_embeddings: The number of embeddings
+        :param n_configs: The number of configurations
+        :param n_dim_features: The number of dimension features
+        """
+
+        # this line is mandatory for all subclasses
+        super().__init__()
+
+        # save the attributes
+        self.emb_size = emb_size
+        self.num_embeddings = num_embeddings
+        self.n_configs = n_configs
+        self.n_dim_features = n_dim_features
+
+        # some dims
+        self.full_dim = in_channels + emb_size + n_configs + n_dim_features
+
+        # init the embedding
+        self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
+
+        # the other layers
+        self.mlp = nn.Sequential(
+            nn.Linear(self.full_dim, out_channels, bias=True),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, op_code: torch.Tensor, features: torch.Tensor, configs: torch.Tensor, dim_features: torch.Tensor):
+        """
+        Forward pass of the layer
+        :param op_code: The op code
+        :param features: The features
+        :param configs: The configs
+        :param dim_features: The dim features
+        :return: The output of the layer
+        """
+
+        # get the first column and convert to int
+        op_code = torch.squeeze(op_code, dim=-1).long()
+
+        # embed the first column
+        embedding = self.emb(op_code)
+
+        # concatenate
+        x = torch.concatenate([embedding, features, dim_features, configs], dim=-1)
+
+        # project
+        x = self.mlp(x)
+
+        return x
+
+
 class SAGEConv(nn.Module):
     """
     Implements a simple SAGE convolution
@@ -262,6 +334,7 @@ class TPUGraphNetwork(nn.Module):
         n_configs: int = 18,
         embedding_dim: int = 32,
         lpe_embedding_dim: int = 32,
+        embedding_version: str = "v2",
         **kwargs,
     ):
         """
@@ -290,7 +363,14 @@ class TPUGraphNetwork(nn.Module):
         self.lpe_embedding_dim = lpe_embedding_dim
 
         # the embedding layer
-        self.embedding_layer = EmbeddingInputLayer(
+        if embedding_version == "v1":
+            emb_layer_class = EmbeddingInputLayer
+        elif embedding_version == "v2":
+            emb_layer_class = EmbeddingInputLayerV2
+        else:
+            raise ValueError(f"Unknown embedding version {embedding_version}")
+
+        self.embedding_layer = emb_layer_class(
             in_channels=n_normal_features,
             out_channels=embedding_out,
             num_embeddings=MAX_OP_CODE,
