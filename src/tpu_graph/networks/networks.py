@@ -1000,9 +1000,9 @@ class TPUGraphNetwork(nn.Module):
             raise ValueError(f"Unknown embedding version {embedding_version}")
         self.message_network = message_network
         self.last_mlp = nn.Sequential(
-            nn.Linear(out_channels, out_channels),
+            nn.Linear(128, 128),
             nn.SiLU(),
-            nn.Linear(out_channels, out_channels),
+            nn.Linear(128, 128),
             nn.SiLU(),
         )
         self.projection_network = projection_network
