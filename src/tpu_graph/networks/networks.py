@@ -317,7 +317,7 @@ class TPUGraphNetwork(nn.Module):
             )
 
         # final projection
-        out_dim = message_network_dims[-1]
+        out_dim = message_network_dims[-1] + n_lpe_features
         self.projection_network = nn.Linear(out_dim, 1, bias=False)
 
     def forward(
@@ -384,6 +384,7 @@ class TPUGraphNetwork(nn.Module):
             emb_features = combi_net(emb_features)
 
         # now we can apply the weights
+        emb_features = torch.cat([lpe_features, emb_features], dim=-1)
         graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
 
         # now we do the final projection

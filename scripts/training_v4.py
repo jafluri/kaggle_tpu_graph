@@ -135,7 +135,7 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetwork(
         embedding_out=256,
-        message_network_dims=[156, 128, 128],
+        message_network_dims=[128],
         n_normal_features=140 + 30,
         n_dim_features=2 * 37,
         n_lpe_features=62,
