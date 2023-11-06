@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import sys
@@ -8,15 +9,14 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch import optim, nn
+from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConvV4, GPSConvV2
-
+from tpu_graph.networks import TPUGraphNetwork
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
 from tqdm import tqdm
-import datetime
+
 import wandb
 
 
@@ -30,8 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -132,29 +132,15 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 + 30 + 2 * 37
-    # the position embedding
-    input_dim += 16
-
-    message_network = nn.Sequential(
-        SAGEConvV4(256, 156),
-        SAGEConvV4(156, 128),
-        GPSConvV2(128, 128),
-        GPSConvV2(128, 128),
-        GPSConvV2(128, 128),
-    )
-    projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
-        in_channels=input_dim,
-        out_channels=256,
-        message_network=message_network,
-        projection_network=projection_network,
-        dropout=kwargs["dropout"],
-        embedding_version="v5",
-        undirected=False,
-        in_and_out=True,
-        add_lengths=True,
+        embedding_out=256,
+        message_network_dims=[156, 128, 128],
+        n_normal_features=159 + 30,
+        n_dim_features=2 * 37,
+        n_lpe_features=64,
+        n_configs=18,
+        embedding_dim=32,
     )
 
     # network to GPU

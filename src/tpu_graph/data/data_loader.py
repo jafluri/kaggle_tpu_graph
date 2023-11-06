@@ -443,6 +443,7 @@ class LayoutDataset(Dataset):
         node_feat = data["node_feat"].copy()
         node_opcode = data["node_opcode"]
         pe = data["pe"]
+        new_pe = data["new_pe"]
         edge_index = data["edge_index"]
 
         # we do everythin mod 128 (the TPU register length)
@@ -454,7 +455,7 @@ class LayoutDataset(Dataset):
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
-        node_feat = np.concatenate([node_feat, pe, dim_features], axis=1)
+        node_feat = np.concatenate([node_feat, dim_features, pe, new_pe], axis=1)
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0
