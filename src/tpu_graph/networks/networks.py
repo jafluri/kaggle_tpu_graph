@@ -781,7 +781,7 @@ class GPSConv(nn.Module):
         self.layernorm1 = nn.LayerNorm(out_dim)
         self.layernorm2 = nn.LayerNorm(out_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor, list[int]]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -789,11 +789,11 @@ class GPSConv(nn.Module):
         """
 
         # unpack the input tensors
-        x_orig, connection_matrix, lengths = inp_tensors
+        x_orig, connection_matrix = inp_tensors
 
         # apply the layers
-        sage_output, _ = self.sage_conv((x_orig, connection_matrix))
-        attention_output, _ = self.attention((x_orig, lengths))
+        sage_output, _ = self.sage_conv(inp_tensors)
+        attention_output, _ = self.attention(inp_tensors)
 
         # add and project
         x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
@@ -839,7 +839,7 @@ class GPSConvV2(nn.Module):
         self.layernorm1 = nn.LayerNorm(out_dim)
         self.layernorm2 = nn.LayerNorm(out_dim)
 
-    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor, list[int]]):
         """
         Forward pass of the layer
         :param inp_tensors: The input tensors (features, connection_matrix)
@@ -847,11 +847,11 @@ class GPSConvV2(nn.Module):
         """
 
         # unpack the input tensors
-        x_orig, connection_matrix = inp_tensors
+        x_orig, connection_matrix, lengths = inp_tensors
 
         # apply the layers
-        sage_output, _ = self.sage_conv(inp_tensors)
-        attention_output, _ = self.attention(inp_tensors)
+        sage_output, _ = self.sage_conv((x_orig, connection_matrix))
+        attention_output, _ = self.attention((x_orig, lengths))
 
         # add and project
         x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
@@ -866,7 +866,7 @@ class GPSConvV2(nn.Module):
         output = self.layernorm2(output)
 
         # we output the connection matrix for the next layer
-        return output, connection_matrix
+        return output, connection_matrix, lengths
 
 
 class TPUGraphNetwork(nn.Module):
@@ -982,7 +982,7 @@ class TPUGraphNetwork(nn.Module):
 
         # apply the transformer networks
         if self.add_lengths:
-            graph_embedding, _ = self.message_network((emb_features, connection_matrix, lengths))
+            graph_embedding, _ = self.message_network((emb_features, connection_matrix))
         else:
             graph_embedding, _ = self.message_network((emb_features, connection_matrix))
         # now we can apply the weights
