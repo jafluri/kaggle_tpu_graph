@@ -274,6 +274,108 @@ class EmbeddingInputLayerV4(nn.Module):
         return x
 
 
+class EmbeddingInputLayerV5(nn.Module):
+    """
+    This is just a layer that splits of the first column of the input and embeds it
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        emb_size: int = 32,
+        num_embeddings: int = 128,
+        n_configs: int = 18,
+        n_projections: int = 18,
+        n_dim_features: int = 74,
+    ):
+        """
+        Inits the layer
+        :param in_channels: The number of input channels without the embedding
+        :param out_channels: The number of output channels after the projection
+        :param emb_size: The size of the embedding
+        :param num_embeddings: The number of embeddings
+        :param n_configs: The number of configurations
+        :param n_projections: The number of projections
+        """
+
+        # this line is mandatory for all subclasses
+        super().__init__()
+
+        # save the attributes
+        self.emb_size = emb_size
+        self.num_embeddings = num_embeddings
+        self.n_configs = n_configs
+        self.n_projections = n_projections
+        self.n_dim_features = n_dim_features
+
+        # some dims
+        self.full_dim = in_channels + emb_size + n_projections - n_configs - n_dim_features - 1
+        self.n_features = in_channels - 1 - n_configs - n_dim_features
+
+        # init the embedding
+        self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
+        self.projections = nn.Linear(n_configs, self.n_dim_features * n_projections, bias=True)
+
+        # config mlp
+        self.config_mlp = nn.Sequential(
+            nn.Linear(n_configs, n_configs, bias=True),
+            nn.SiLU(),
+            nn.Linear(n_configs, n_configs, bias=True),
+            nn.SiLU(),
+        )
+        self.dim_mlp = nn.Sequential(
+            nn.Linear(n_dim_features, n_dim_features, bias=True),
+            nn.SiLU(),
+            nn.Linear(n_dim_features, n_dim_features, bias=True),
+            nn.SiLU(),
+        )
+
+        # the other layers
+        self.mlp = nn.Sequential(
+            nn.Linear(self.full_dim, out_channels, bias=True),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
+
+    def forward(self, x: torch.Tensor):
+        """
+        Forward pass of the layer
+        :param x: The input tensor
+        :return: The input tensor with the first column embedded
+        """
+
+        # get the first column and convert to int
+        op_code, features, dim_features, configs = torch.split(
+            x, [1, self.n_features, self.n_dim_features, self.n_configs], dim=-1
+        )
+        op_code = torch.squeeze(op_code, dim=-1).long()
+
+        # embed the first column
+        embedding = self.emb(op_code)
+
+        # apply the MLPs
+        configs = self.config_mlp(configs)
+        dim_features = self.dim_mlp(dim_features)
+
+        # project the configs
+        configs_emb = self.projections(configs)
+        configs_emb = nn.functional.gelu(configs_emb)
+        list_dim, graph_dim, _ = configs_emb.shape
+        configs_emb = configs_emb.reshape(list_dim, graph_dim, self.n_dim_features, self.n_projections)
+
+        # project the features
+        weights = torch.einsum("lgf,lgfp->lgp", dim_features, configs_emb)
+
+        # concatenate
+        x = torch.concatenate([embedding, features, weights], dim=-1)
+
+        # project
+        x = self.mlp(x)
+
+        return x
+
+
 class SAGEConv(nn.Module):
     """
     Implements a simple SAGE convolution
@@ -705,6 +807,8 @@ class TPUGraphNetwork(nn.Module):
             self.embedding_layer = EmbeddingInputLayerV3(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         elif embedding_version == "v4":
             self.embedding_layer = EmbeddingInputLayerV4(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
+        elif embedding_version == "v5":
+            self.embedding_layer = EmbeddingInputLayerV5(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         else:
             raise ValueError(f"Unknown embedding version {embedding_version}")
         self.message_network = message_network

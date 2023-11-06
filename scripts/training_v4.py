@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 import sys
@@ -13,10 +12,11 @@ from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork, SAGEConvV3
+
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
 from tqdm import tqdm
-
+import datetime
 import wandb
 
 
@@ -27,7 +27,7 @@ def setup(rank, world_size):
     :param world_size: The total number of processes
     """
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12399"
+    os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
     dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
@@ -131,7 +131,7 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 + 30
+    input_dim = 159 + 30 + 2 * 37
     # the position embedding
     input_dim += 16
 
@@ -148,7 +148,7 @@ def train_network(rank, kwargs):
         message_network=message_network,
         projection_network=projection_network,
         dropout=kwargs["dropout"],
-        embedding_version="v2",
+        embedding_version="v5",
         undirected=False,
         in_and_out=True,
     )
