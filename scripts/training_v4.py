@@ -154,6 +154,7 @@ def train_network(rank, kwargs):
         embedding_version="v5",
         undirected=False,
         in_and_out=True,
+        add_lengths=True,
     )
 
     # network to GPU
