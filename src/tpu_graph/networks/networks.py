@@ -634,7 +634,7 @@ class SAGEConvV4(nn.Module):
         """
 
         # unpack the input tensors
-        x, connection_matrix, _ = inp_tensors
+        x, connection_matrix, lengths = inp_tensors
         connection_matrix_in, connection_matrix_out = connection_matrix
 
         # project everything
@@ -665,7 +665,7 @@ class SAGEConvV4(nn.Module):
         # apply the MLP
         output = self.mlp_out(output)
 
-        return output, connection_matrix
+        return output, connection_matrix, lengths
 
 
 class RetentiveAttention(nn.Module):
