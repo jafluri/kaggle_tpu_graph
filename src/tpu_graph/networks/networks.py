@@ -41,8 +41,7 @@ class EmbeddingInputLayer(nn.Module):
         self.n_dim_features = n_dim_features
 
         # some dims
-        self.full_dim = in_channels + emb_size + n_projections - n_configs - n_dim_features - 1
-        self.n_features = in_channels - 1 - n_configs - n_dim_features
+        self.full_dim = in_channels + emb_size + n_projections
 
         # init the embedding
         self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
@@ -290,7 +289,7 @@ class TPUGraphNetwork(nn.Module):
 
         # the embedding layer
         self.embedding_layer = EmbeddingInputLayer(
-            in_channels=self.in_channels,
+            in_channels=n_normal_features,
             out_channels=embedding_out,
             num_embeddings=MAX_OP_CODE,
             emb_size=embedding_dim,
