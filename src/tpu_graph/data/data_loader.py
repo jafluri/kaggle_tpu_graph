@@ -116,7 +116,7 @@ class LayoutDataset(Dataset):
         # get all the files
         self.file_list = []
         for path in self.data_path:
-            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")]
+            file_list = [f for f in sorted(path.glob("*.npz")) if not f.name.endswith("_cached.npz")][:4]
             logger.info(f"Found {len(file_list)} files in {path}")
             self.file_list.extend(file_list)
 
@@ -323,6 +323,7 @@ class LayoutDataset(Dataset):
                 _data_dict["node_opcode"] = _data["node_opcode"][:]
                 _data_dict["edge_index"] = _data["edge_index"][:]
                 _data_dict["pe"] = _data["pe"][:]
+                _data_dict["new_pe"] = _data["new_pe"][:]
                 _data_dict["node_config_ids"] = _data["node_config_ids"][:]
 
                 # we only get a subset of the config features and runtimes
