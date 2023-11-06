@@ -340,10 +340,6 @@ class TPUGraphNetwork(nn.Module):
 
         # build the connection matrix
         with torch.no_grad():
-            # add the reverse edges if necessary
-            if self.undirected:
-                edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=-1)
-
             # create the connection matrix
             n_nodes = features.shape[1]
             values = torch.ones(edge_index.shape[1]).to(edge_index.device)
