@@ -695,6 +695,64 @@ class RetentiveAttention(nn.Module):
         return output, connection_matrix
 
 
+class LinFormer(nn.Module):
+    """
+    A linear attention transformer
+    """
+
+    def __init__(self, in_channels, out_channels, key_dim=64, query_dim=64):
+        """
+        Init the layer
+        :param in_channels: The number of input channels
+        :param out_channels: The number of output channels
+        :param key_dim: The dimension of the key
+        :param query_dim: The dimension of the query
+        """
+
+        # init the super class
+        super().__init__()
+
+        # layers
+        self.key_layer = nn.Linear(in_channels, key_dim, bias=True)
+        self.query_layer = nn.Linear(in_channels, query_dim, bias=True)
+        self.value_layer = nn.Linear(in_channels, out_channels, bias=False)
+
+    def forward(self, x: tuple[torch.Tensor, list[int]]):
+        """
+        Forward pass of the layer
+        :param x: The inputs (features, lengths of individual graphs)
+        :return: The output of the layer
+        """
+
+        # unpack the inputs
+        features, lengths = x
+
+        # embed the keys, queries and values
+        keys = self.key_layer(features)
+        queries = self.query_layer(features)
+        values = self.value_layer(features)
+
+        # activate the queries and keys
+        keys = nn.functional.elu(keys) + 1
+        queries = nn.functional.elu(queries) + 1
+
+        # split everything
+        keys = torch.split(keys, lengths, dim=1)
+        queries = torch.split(queries, lengths, dim=1)
+        values = torch.split(values, lengths, dim=1)
+
+        # k.T@val
+        ktv = [torch.matmul(k.transpose(1, 2), v) for k, v in zip(keys, values)]
+
+        # now key @ qtv
+        qktv = [torch.matmul(q, ktv_i) for q, ktv_i in zip(queries, ktv)]
+
+        # stack everything
+        qktv = torch.concatenate(qktv, dim=1)
+
+        return qktv
+
+
 class GPSConv(nn.Module):
     """
     Implements the scaled dot product attention with batching over one large tensor using the scatter library
@@ -717,6 +775,64 @@ class GPSConv(nn.Module):
         # init the layers
         self.sage_conv = SAGEConv(inp_dim, out_dim)
         self.attention = RetentiveAttention(inp_dim, out_dim)
+        self.linear1 = nn.Linear(2 * out_dim, out_dim)
+        self.linear2 = nn.Linear(out_dim, out_dim)
+        self.silu = nn.SiLU()
+        self.layernorm1 = nn.LayerNorm(out_dim)
+        self.layernorm2 = nn.LayerNorm(out_dim)
+
+    def forward(self, inp_tensors: tuple[torch.Tensor, torch.sparse.Tensor]):
+        """
+        Forward pass of the layer
+        :param inp_tensors: The input tensors (features, connection_matrix)
+        :return: The attention output
+        """
+
+        # unpack the input tensors
+        x_orig, connection_matrix = inp_tensors
+
+        # apply the layers
+        sage_output, _ = self.sage_conv(inp_tensors)
+        attention_output, _ = self.attention(inp_tensors)
+
+        # add and project
+        x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
+
+        # activation and layer norm
+        x = self.silu(x)
+        x = self.layernorm1(x)
+
+        # second layer with skip connection
+        x = self.linear2(x)
+        output = self.silu(x + x_orig)
+        output = self.layernorm2(output)
+
+        # we output the connection matrix for the next layer
+        return output, connection_matrix
+
+
+class GPSConvV2(nn.Module):
+    """
+    Implements the scaled dot product attention with batching over one large tensor using the scatter library
+    """
+
+    def __init__(self, inp_dim: int, out_dim: int):
+        """
+        Init the layer
+        :param inp_dim: The input dimension
+        :param out_dim: The output dimension
+        """
+
+        # init the super class
+        super().__init__()
+
+        # save attributes
+        self.inp_dim = inp_dim
+        self.out_dim = out_dim
+
+        # init the layers
+        self.sage_conv = SAGEConvV3(inp_dim, out_dim)
+        self.attention = LinFormer(inp_dim, out_dim)
         self.linear1 = nn.Linear(2 * out_dim, out_dim)
         self.linear2 = nn.Linear(out_dim, out_dim)
         self.silu = nn.SiLU()

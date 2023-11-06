@@ -11,7 +11,7 @@ import torch.multiprocessing as mp
 from torch import optim, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConvV3
+from tpu_graph.networks import TPUGraphNetwork, SAGEConvV3, GPSConvV2
 
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
@@ -30,8 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -138,9 +138,9 @@ def train_network(rank, kwargs):
     message_network = nn.Sequential(
         SAGEConvV3(256, 156),
         SAGEConvV3(156, 128),
-        SAGEConvV3(128, 128),
-        SAGEConvV3(128, 128),
-        SAGEConvV3(128, 128),
+        GPSConvV2(128, 128),
+        GPSConvV2(128, 128),
+        GPSConvV2(128, 128),
     )
     projection_network = nn.Linear(128, 1)
 
