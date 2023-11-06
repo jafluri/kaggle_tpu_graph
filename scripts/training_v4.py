@@ -30,8 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -136,13 +136,13 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConvV3(256, 256),
-        SAGEConvV3(256, 256),
-        SAGEConvV3(256, 256),
-        SAGEConvV3(256, 256),
-        SAGEConvV3(256, 256),
+        SAGEConvV3(256, 156),
+        SAGEConvV3(156, 128),
+        SAGEConvV3(128, 128),
+        SAGEConvV3(128, 128),
+        SAGEConvV3(128, 128),
     )
-    projection_network = nn.Linear(256, 1)
+    projection_network = nn.Linear(128, 1)
 
     network = TPUGraphNetwork(
         in_channels=input_dim,
