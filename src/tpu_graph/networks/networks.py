@@ -982,7 +982,7 @@ class TPUGraphNetwork(nn.Module):
 
         # apply the transformer networks
         if self.add_lengths:
-            graph_embedding, _ = self.message_network((emb_features, connection_matrix))
+            graph_embedding, _ = self.message_network((emb_features, connection_matrix, lengths))
         else:
             graph_embedding, _ = self.message_network((emb_features, connection_matrix))
         # now we can apply the weights
