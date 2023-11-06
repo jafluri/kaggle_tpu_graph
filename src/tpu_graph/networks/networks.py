@@ -928,7 +928,7 @@ class GPSConvV2(nn.Module):
 
         # apply the layers
         sage_output, _ = self.sage_conv((x_orig, connection_matrix))
-        attention_output, _ = self.attention((x_orig, lengths))
+        attention_output = self.attention((x_orig, lengths))
 
         # add and project
         x = self.linear1(torch.concatenate([sage_output, attention_output], dim=-1))
