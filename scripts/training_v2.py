@@ -151,7 +151,7 @@ def train_network(rank, kwargs):
         message_network=message_network,
         projection_network=projection_network,
         dropout=kwargs["dropout"],
-        embedding_version="v3",
+        embedding_version="v4",
     )
 
     # network to GPU

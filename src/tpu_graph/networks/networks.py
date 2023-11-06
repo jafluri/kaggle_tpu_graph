@@ -703,6 +703,8 @@ class TPUGraphNetwork(nn.Module):
             self.embedding_layer = EmbeddingInputLayerV2(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         elif embedding_version == "v3":
             self.embedding_layer = EmbeddingInputLayerV3(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
+        elif embedding_version == "v4":
+            self.embedding_layer = EmbeddingInputLayerV4(in_channels, out_channels, op_embedding_dim, MAX_OP_CODE)
         else:
             raise ValueError(f"Unknown embedding version {embedding_version}")
         self.message_network = message_network
