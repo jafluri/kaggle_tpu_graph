@@ -136,11 +136,13 @@ def train_network(rank, kwargs):
     input_dim += 16
 
     message_network = nn.Sequential(
-        SAGEConvV3(256, 156, in_and_out=False),
-        SAGEConvV3(156, 128),
-        SAGEConvV3(128, 128),
+        SAGEConvV3(256, 256),
+        SAGEConvV3(256, 256),
+        SAGEConvV3(256, 256),
+        SAGEConvV3(256, 256),
+        SAGEConvV3(256, 256),
     )
-    projection_network = nn.Linear(128, 1)
+    projection_network = nn.Linear(256, 1)
 
     network = TPUGraphNetwork(
         in_channels=input_dim,

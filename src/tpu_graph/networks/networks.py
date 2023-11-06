@@ -519,12 +519,12 @@ class SAGEConvV3(nn.Module):
     Implements a simple SAGE convolution
     """
 
-    def __init__(self, in_channels: int, out_channels: int, in_and_out: bool = True):
+    def __init__(self, in_channels: int, out_channels: int, message_dim=32):
         """
         Inits the layer
         :param in_channels: Number of input channels
         :param out_channels: Number of output channels
-        :param in_and_out: If True, use the in and out connection matrices separately
+        :param message_dim: The dimension of the messages
         """
 
         # init the super class
@@ -533,24 +533,21 @@ class SAGEConvV3(nn.Module):
         # save attributes
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.in_and_out = in_and_out
+        self.message_dim = message_dim
 
-        if in_and_out:
-            # init the layers
-            self.linear = nn.Linear(in_channels, out_channels, bias=True)
-            self.agg_linear_in = nn.Linear(in_channels, out_channels, bias=True)
-            self.agg_linear_out = nn.Linear(in_channels, out_channels, bias=True)
-            self.silu = nn.SiLU()
-            self.layernorm = nn.LayerNorm(3 * out_channels)
+        # init the layers
+        self.linear = nn.Linear(in_channels, out_channels, bias=True)
+        self.agg_linear_in = nn.Linear(in_channels, message_dim, bias=True)
+        self.agg_linear_out = nn.Linear(in_channels, message_dim, bias=True)
+        self.silu = nn.SiLU()
+        self.layernorm = nn.LayerNorm(out_channels + 2 * message_dim)
 
-            # for the output MLP with layer norm
-            self.mlp_out = nn.Sequential(
-                nn.Linear(3 * out_channels, out_channels),
-                nn.SiLU(),
-                nn.LayerNorm(out_channels),
-            )
-        else:
-            self.sage_conv = SAGEConv(in_channels, out_channels)
+        # for the output MLP with layer norm
+        self.mlp_out = nn.Sequential(
+            nn.Linear(out_channels + 2 * message_dim, out_channels),
+            nn.SiLU(),
+            nn.LayerNorm(out_channels),
+        )
 
     def forward(self, inp_tensors: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]):
         """
@@ -563,30 +560,25 @@ class SAGEConvV3(nn.Module):
         x, connection_matrix = inp_tensors
         connection_matrix_in, connection_matrix_out = connection_matrix
 
-        if not self.in_and_out:
-            output, _ = self.sage_conv((x, connection_matrix_in))
-            return output, connection_matrix
-
-        # the normal projection
+        # project everything
         projection = self.linear(x)
+        projection_in = self.agg_linear_in(x)
+        projection_out = self.agg_linear_out(x)
 
         # get the input dimension
-        list_dim, graph_dim, inp_dim = x.shape
+        list_dim, graph_dim, _ = x.shape
 
         # (list, graph, inp) -> (graph, inp * list)
-        x = x.transpose(0, 1).reshape(graph_dim, -1)
+        projection_in = projection_in.transpose(0, 1).reshape(graph_dim, -1)
+        projection_out = projection_out.transpose(0, 1).reshape(graph_dim, -1)
 
         # apply the connection matrix
-        in_coming = torch.sparse.mm(connection_matrix_in, x)
-        out_going = torch.sparse.mm(connection_matrix_out, x)
+        in_coming = torch.sparse.mm(connection_matrix_in, projection_in)
+        out_going = torch.sparse.mm(connection_matrix_out, projection_out)
 
         # back to (list, graph, inp)
-        in_coming = in_coming.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
-        out_going = out_going.reshape(graph_dim, list_dim, inp_dim).transpose(0, 1)
-
-        # the aggregation projection
-        agg_projection_in = self.agg_linear_in(in_coming)
-        agg_projection_out = self.agg_linear_out(out_going)
+        agg_projection_in = in_coming.reshape(graph_dim, list_dim, self.message_dim).transpose(0, 1)
+        agg_projection_out = out_going.reshape(graph_dim, list_dim, self.message_dim).transpose(0, 1)
 
         # the output
         output = torch.concatenate([projection, agg_projection_in, agg_projection_out], dim=-1)
