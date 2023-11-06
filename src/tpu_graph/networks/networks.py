@@ -261,6 +261,7 @@ class TPUGraphNetwork(nn.Module):
         n_lpe_features: int,
         n_configs: int = 18,
         embedding_dim: int = 32,
+        lpe_embedding_dim: int = 32,
         **kwargs,
     ):
         """
@@ -286,6 +287,7 @@ class TPUGraphNetwork(nn.Module):
         self.n_configs = n_configs
         self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
         self.embedding_dim = embedding_dim
+        self.lpe_embedding_dim = lpe_embedding_dim
 
         # the embedding layer
         self.embedding_layer = EmbeddingInputLayer(
@@ -298,6 +300,12 @@ class TPUGraphNetwork(nn.Module):
             n_projections=n_configs,
         )
 
+        # lpe initial projection
+        self.lpe_projection = nn.Sequential(
+            nn.Linear(n_lpe_features, lpe_embedding_dim),
+            nn.Tanh(),
+        )
+
         # the message network
         self.feature_sage_convs = nn.ModuleList()
         self.lpe_sage_convs = nn.ModuleList()
@@ -305,9 +313,9 @@ class TPUGraphNetwork(nn.Module):
         self.combination_nets = nn.ModuleList()
         message_network_dims = [embedding_out] + message_network_dims
         for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.feature_sage_convs.append(SAGEConv(n_lpe_features + in_dim, out_dim))
-            self.lpe_sage_convs.append(SAGEConv(n_lpe_features, n_lpe_features, lpe_conv=True))
-            self.linformers.append(LinFormer(n_lpe_features + in_dim, out_dim))
+            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim))
+            self.lpe_sage_convs.append(SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=16))
+            self.linformers.append(LinFormer(lpe_embedding_dim + in_dim, out_dim))
             self.combination_nets.append(
                 nn.Sequential(
                     nn.Linear(2 * out_dim, out_dim),
@@ -317,7 +325,7 @@ class TPUGraphNetwork(nn.Module):
             )
 
         # final projection
-        out_dim = message_network_dims[-1] + n_lpe_features
+        out_dim = message_network_dims[-1] + lpe_embedding_dim
         self.projection_network = nn.Linear(out_dim, 1, bias=False)
 
     def forward(
@@ -362,6 +370,9 @@ class TPUGraphNetwork(nn.Module):
 
         # embed the first column
         emb_features = self.embedding_layer(op_code, features, configs, dim_features)
+
+        # project the LPE features
+        lpe_features = self.lpe_projection(lpe_features)
 
         # cycle through all layers
         for feature_sage_conv, lpe_sage_conv, linformer, combi_net in zip(
