@@ -139,6 +139,7 @@ def train_network(rank, kwargs):
         n_dim_features=2 * 37,
         n_lpe_features=62,
         n_configs=18,
+        n_projections=15,
         embedding_dim=32,
         embedding_version="v1",
     )
