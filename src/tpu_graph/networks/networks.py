@@ -497,6 +497,7 @@ class TPUGraphNetworkV2(nn.Module):
         n_dim_features: int,
         n_lpe_features: int,
         n_configs: int = 18,
+        n_projections: int = 15,
         embedding_dim: int = 32,
         lpe_embedding_dim: int = 32,
         embedding_version: str = "v2",
@@ -523,6 +524,7 @@ class TPUGraphNetworkV2(nn.Module):
         self.n_dim_features = n_dim_features
         self.n_lpe_features = n_lpe_features
         self.n_configs = n_configs
+        self.n_projections = n_projections
         self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
         self.embedding_dim = embedding_dim
         self.lpe_embedding_dim = lpe_embedding_dim
@@ -542,7 +544,7 @@ class TPUGraphNetworkV2(nn.Module):
             emb_size=embedding_dim,
             n_configs=n_configs,
             n_dim_features=n_dim_features,
-            n_projections=n_configs,
+            n_projections=n_projections,
         )
 
         # lpe initial projection
