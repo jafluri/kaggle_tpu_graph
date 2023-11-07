@@ -644,7 +644,7 @@ class TPUGraphNetworkV2(nn.Module):
 
         # concatenate and combine
         emb_features = torch.cat([sage_features, linformer_features], dim=-1)
-        emb_features = self.combi_net(emb_features)
+        emb_features = self.combination_net(emb_features)
 
         # fold in the last LPE features
         emb_features = torch.cat([lpe_features, emb_features], dim=-1)
