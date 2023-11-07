@@ -623,7 +623,7 @@ class TPUGraphNetworkV2(nn.Module):
         )
 
         # embed the first column
-        emb_features = self.embedding_layer(op_code, features, configs, dim_features)
+        sage_features = self.embedding_layer(op_code, features, configs, dim_features)
 
         # project the LPE features
         lpe_features = self.lpe_projection(lpe_features)
@@ -631,7 +631,7 @@ class TPUGraphNetworkV2(nn.Module):
         # cycle through all layers
         for feature_sage_conv, lpe_sage_conv in zip(self.feature_sage_convs, self.lpe_sage_convs):
             # add the current LPE features to the features
-            emb_features = torch.cat([lpe_features, emb_features], dim=-1)
+            emb_features = torch.cat([lpe_features, sage_features], dim=-1)
 
             # apply the feature sage conv
             sage_features = feature_sage_conv(emb_features, connection_matrix_in, connection_matrix_out)
