@@ -134,14 +134,13 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetworkV2(
         embedding_out=256,
-        message_network_dims=[156, 128, 128],
+        message_network_dims=[160, 128, 128],
         n_normal_features=140 + 30,
         n_dim_features=2 * 37,
         n_lpe_features=62,
         n_configs=18,
-        n_projections=15,
         embedding_dim=32,
-        embedding_version="v1",
+        embedding_version="v2",
     )
 
     # network to GPU
