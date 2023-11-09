@@ -404,8 +404,19 @@ class TPUGraphNetwork(nn.Module):
                 )
             )
 
+        # last mlp to fold in the final lpe features
+        in_dim = message_network_dims[-1] + lpe_embedding_dim
+        out_dim = message_network_dims[-1]
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, in_dim),
+            nn.SiLU(),
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, out_dim),
+            nn.SiLU(),
+            nn.LayerNorm(out_dim),
+        )
+
         # final projection
-        out_dim = message_network_dims[-1] + lpe_embedding_dim
         self.projection_network = nn.Linear(out_dim, 1, bias=False)
 
     def forward(

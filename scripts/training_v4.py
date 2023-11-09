@@ -133,14 +133,14 @@ def train_network(rank, kwargs):
     logger.info("Building the network")
 
     network = TPUGraphNetwork(
-        embedding_out=192,
-        message_network_dims=[160, 128, 128],
+        embedding_out=256,
+        message_network_dims=[192, 160, 128],
         n_normal_features=140 + 30,
         n_dim_features=2 * 37,
         n_lpe_features=62,
         n_configs=18,
         embedding_dim=32,
-        embedding_version="v1",
+        embedding_version="v2",
     )
 
     # network to GPU
