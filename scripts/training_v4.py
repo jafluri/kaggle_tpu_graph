@@ -30,8 +30,8 @@ def setup(rank, world_size):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -133,13 +133,14 @@ def train_network(rank, kwargs):
     logger.info("Building the network")
 
     network = TPUGraphNetwork(
-        embedding_out=156,
-        message_network_dims=[128, 128, 128],
+        embedding_out=192,
+        message_network_dims=[160, 128, 128],
         n_normal_features=140 + 30,
         n_dim_features=2 * 37,
         n_lpe_features=62,
         n_configs=18,
         embedding_dim=32,
+        embedding_version="v1",
     )
 
     # network to GPU
