@@ -119,6 +119,7 @@ class EmbeddingInputLayerV2(nn.Module):
         num_embeddings: int = 128,
         n_configs: int = 18,
         n_dim_features: int = 74,
+        layer_norm: bool = True,
         **kwargs,
     ):
         """
@@ -129,6 +130,7 @@ class EmbeddingInputLayerV2(nn.Module):
         :param num_embeddings: The number of embeddings
         :param n_configs: The number of configurations
         :param n_dim_features: The number of dimension features
+        :param layer_norm: Whether to use layer norm or not
         """
 
         # this line is mandatory for all subclasses
@@ -150,7 +152,7 @@ class EmbeddingInputLayerV2(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(self.full_dim, out_channels, bias=True),
             nn.SiLU(),
-            nn.LayerNorm(out_channels),
+            nn.LayerNorm(out_channels) if layer_norm else nn.Identity(),
         )
 
     def forward(self, op_code: torch.Tensor, features: torch.Tensor, configs: torch.Tensor, dim_features: torch.Tensor):
@@ -690,6 +692,7 @@ class TPUGraphNetworkSimple(nn.Module):
         n_configs: int = 18,
         embedding_dim: int = 128,
         embedding_version: str = "v2",
+        layer_norm: bool = True,
         **kwargs,
     ):
         """
@@ -732,6 +735,7 @@ class TPUGraphNetworkSimple(nn.Module):
             n_configs=n_configs,
             n_dim_features=n_dim_features,
             n_projections=n_configs,
+            layer_norm=layer_norm,
         )
 
         # the message network is a simple MLP
@@ -742,7 +746,7 @@ class TPUGraphNetworkSimple(nn.Module):
                 nn.Sequential(
                     nn.Linear(in_dim, out_dim),
                     nn.SiLU(),
-                    nn.LayerNorm(out_dim),
+                    nn.LayerNorm(out_dim) if layer_norm else nn.Identity(),
                 )
             )
 

@@ -141,7 +141,8 @@ def train_network(rank, kwargs):
         n_lpe_features=62,
         n_configs=18,
         embedding_dim=128,
-        embedding_version="v1",
+        embedding_version="v2",
+        layer_norm=False,
     )
 
     # network to GPU
