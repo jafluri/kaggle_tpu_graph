@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import sys
@@ -8,15 +9,14 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch import optim, nn
+from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tpu_graph.data import LayoutDataset
-from tpu_graph.networks import TPUGraphNetwork, SAGEConvV2
-
+from tpu_graph.networks import TPUGraphNetworkSimple
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
 from tqdm import tqdm
-import datetime
+
 import wandb
 
 
@@ -59,6 +59,7 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
+            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -131,26 +132,16 @@ def train_network(rank, kwargs):
 
     # we build a super simple network for starters
     logger.info("Building the network")
-    input_dim = 159 + 30
-    # the position embedding
-    input_dim += 16
 
-    message_network = nn.Sequential(
-        SAGEConvV2(256, 156),
-        SAGEConvV2(156, 128),
-        SAGEConvV2(128, 128),
-        SAGEConvV2(128, 128),
-        SAGEConvV2(128, 128),
-    )
-    projection_network = nn.Linear(128, 1)
-
-    network = TPUGraphNetwork(
-        in_channels=input_dim,
-        out_channels=256,
-        message_network=message_network,
-        projection_network=projection_network,
-        dropout=kwargs["dropout"],
-        undirected=True,
+    network = TPUGraphNetworkSimple(
+        embedding_out=512,
+        message_network_dims=[512, 256, 256, 256],
+        n_normal_features=140 + 30,
+        n_dim_features=2 * 37,
+        n_lpe_features=62,
+        n_configs=18,
+        embedding_dim=128,
+        embedding_version="v1",
     )
 
     # network to GPU

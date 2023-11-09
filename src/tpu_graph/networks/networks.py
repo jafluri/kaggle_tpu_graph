@@ -673,3 +673,117 @@ class TPUGraphNetworkV2(nn.Module):
         runtimes = self.projection_network(graph_embedding)
 
         return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
+
+
+class TPUGraphNetworkSimple(nn.Module):
+    """
+    A simple network used for the tile predictions
+    """
+
+    def __init__(
+        self,
+        embedding_out: int,
+        message_network_dims: list[int],
+        n_normal_features: int,
+        n_dim_features: int,
+        n_lpe_features: int,
+        n_configs: int = 18,
+        embedding_dim: int = 128,
+        embedding_version: str = "v2",
+        **kwargs,
+    ):
+        """
+        Init the network
+        :param embedding_out: Output dimension of the embedding layer
+        :param message_network_dims: The dimensions of the message network (output dimensions of each layer)
+        :param n_normal_features: The number of normal features
+        :param n_dim_features: The number of dimension features
+        :param n_lpe_features: The number of LPE features
+        :param n_configs: The number of configurations
+        :param kwargs: Additional arguments
+        """
+
+        # init the super class
+        super().__init__(**kwargs)
+
+        # save attributes
+        self.embedding_out = embedding_out
+        self.message_network_dims = message_network_dims
+        self.n_normal_features = n_normal_features
+        self.n_dim_features = n_dim_features
+        self.n_lpe_features = n_lpe_features
+        self.n_configs = n_configs
+        self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
+        self.embedding_dim = embedding_dim
+
+        # the embedding layer
+        if embedding_version == "v1":
+            emb_layer_class = EmbeddingInputLayer
+        elif embedding_version == "v2":
+            emb_layer_class = EmbeddingInputLayerV2
+        else:
+            raise ValueError(f"Unknown embedding version {embedding_version}")
+
+        self.embedding_layer = emb_layer_class(
+            in_channels=n_normal_features,
+            out_channels=embedding_out,
+            num_embeddings=MAX_OP_CODE,
+            emb_size=embedding_dim,
+            n_configs=n_configs,
+            n_dim_features=n_dim_features,
+            n_projections=n_configs,
+        )
+
+        # the message network is a simple MLP
+        message_network_dims = [embedding_out] + message_network_dims
+        self.message_network = nn.ModuleList()
+        for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
+            self.message_network.append(
+                nn.Sequential(
+                    nn.Linear(in_dim, out_dim),
+                    nn.SiLU(),
+                    nn.LayerNorm(out_dim),
+                )
+            )
+
+        # final projection
+        out_dim = message_network_dims[-1]
+        self.projection_network = nn.Linear(out_dim, 1, bias=False)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        edge_index: torch.Tensor,
+        lengths: list[int],
+    ):
+        """
+        Forward pass of the network
+        :param features: The input features (multiple graphs concatenated)
+        :param edge_index: The indices of the connection matrix
+        :param lengths: The lengths of the individual graphs
+        :return: The predicted runtime in nanoseconds
+        """
+
+        # create and index for the scatter sum
+        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to(features.device)
+
+        # split the input features
+        op_code, features, dim_features, lpe_features, configs = torch.split(
+            features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
+        )
+
+        # embed the first column
+        emb_features = self.embedding_layer(op_code, features, configs, dim_features)
+
+        # cycle through all layers
+        for layer in self.message_network:
+            # apply the layer
+            emb_features = layer(emb_features)
+
+        # now we can apply the weights
+        graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
+
+        # now we do the final projection
+        runtimes = self.projection_network(graph_embedding)
+
+        return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
