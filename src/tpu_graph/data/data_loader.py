@@ -481,6 +481,21 @@ class LayoutDatasetV2(LayoutDataset):
     This dataset throws away all nodes which are not configurable
     """
 
+    @staticmethod
+    def _adapt_configs(configs: np.ndarray):
+        """
+        All configs with the default layout are adapted to get the -2 label
+        :param configs: The configs to adapt (3D array)
+        :return: The adapted configs
+        """
+
+        list_shape, n_nodes, _ = configs.shape
+        new_config = configs.reshape(list_shape, n_nodes, 3, 6)
+        mask = (new_config == -1).all(axis=-1)
+        new_config[mask] = -2
+
+        return new_config.reshape(list_shape, n_nodes, -1)
+
     def __getitem__(self, idx):
         """
         Loads a file into memory and returns a sample
@@ -509,8 +524,14 @@ class LayoutDatasetV2(LayoutDataset):
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, dim_features, pe, new_pe], axis=1)
 
+        # get the configs and adapt them
+        config_feat = data["node_config_feat"][indices]
+        config_feat = self._adapt_configs(config_feat)
+
         # we divide by 5 to normalize the config features
-        config_feat = data["node_config_feat"][indices] / 5.0
+        config_feat = config_feat / 5.0
+
+        # the node config ids
         node_config_ids = data["node_config_ids"]
 
         # select only the configurable nodes
@@ -519,9 +540,11 @@ class LayoutDatasetV2(LayoutDataset):
 
         # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
         config_runtime = data["config_runtime"][indices]
-
-        # tile config_features such that axis 0 matches with the number of nodes
         node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
+        # now where the config is default we add 128 to the opcode
+        node_opcode[config_feat.sum(axis=2, keepdims=True) <= -17.5] += 128
+
+        # tile the rest
         node_feat = np.tile(node_feat, (self.list_size, 1, 1))
         features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
 

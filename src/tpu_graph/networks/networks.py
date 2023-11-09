@@ -692,6 +692,7 @@ class TPUGraphNetworkSimple(nn.Module):
         n_configs: int = 18,
         embedding_dim: int = 128,
         embedding_version: str = "v2",
+        num_embeddings: int | None = None,
         layer_norm: bool = True,
         **kwargs,
     ):
@@ -730,7 +731,7 @@ class TPUGraphNetworkSimple(nn.Module):
         self.embedding_layer = emb_layer_class(
             in_channels=n_normal_features,
             out_channels=embedding_out,
-            num_embeddings=MAX_OP_CODE,
+            num_embeddings=MAX_OP_CODE if num_embeddings is None else num_embeddings,
             emb_size=embedding_dim,
             n_configs=n_configs,
             n_dim_features=n_dim_features,
