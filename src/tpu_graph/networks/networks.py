@@ -485,8 +485,11 @@ class TPUGraphNetwork(nn.Module):
             emb_features = torch.cat([sage_features, linformer_features], dim=-1)
             emb_features = combi_net(emb_features)
 
-        # now we can apply the weights
+        # final mlp
         emb_features = torch.cat([lpe_features, emb_features], dim=-1)
+        emb_features = self.mlp(emb_features)
+
+        # sum over the graphs
         graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
 
         # now we do the final projection
