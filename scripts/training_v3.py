@@ -59,7 +59,6 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
-            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -282,7 +281,7 @@ def train_network(rank, kwargs):
                 logger.info("Shuffling the dataset")
                 train_dataset.reshuffle_indices()
             train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
-        elif kwargs["n_configs_per_file"] is not None and epoch < kwargs["epochs"] - 1:
+        elif kwargs["n_configs_per_file"] is None and epoch < kwargs["epochs"] - 1:
             logger.info("Shuffling the dataset")
             train_dataset.reshuffle_indices()
             train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
