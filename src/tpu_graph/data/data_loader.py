@@ -515,6 +515,7 @@ class LayoutDatasetV2(LayoutDataset):
 
         # select only the configurable nodes
         node_feat = node_feat[node_config_ids]
+        node_opcode = node_opcode[node_config_ids]
 
         # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
         config_runtime = data["config_runtime"][indices]
