@@ -324,6 +324,7 @@ class LayoutDataset(Dataset):
                 _data_dict["edge_index"] = _data["edge_index"][:]
                 _data_dict["pe"] = _data["pe"][:]
                 _data_dict["new_pe"] = _data["new_pe"][:]
+                _data_dict["node_feat_input"] = _data["node_feat_input"][:]
                 _data_dict["node_config_ids"] = _data["node_config_ids"][:]
 
                 # we only get a subset of the config features and runtimes
@@ -508,6 +509,8 @@ class LayoutDatasetV2(LayoutDataset):
 
         # read out the data for this graph (we copy because a subset will be logged)
         node_feat = data["node_feat"].copy()
+        # the input features are loged + 3 because of padding values of -2
+        node_feat_input = np.log(data["node_feat_input"] + 3)
         node_opcode = data["node_opcode"]
         pe = data["pe"]
         new_pe = data["new_pe"]
@@ -522,7 +525,7 @@ class LayoutDatasetV2(LayoutDataset):
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
-        node_feat = np.concatenate([node_feat, dim_features, pe, new_pe], axis=1)
+        node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
 
         # get the configs and adapt them
         config_feat = data["node_config_feat"][indices]
