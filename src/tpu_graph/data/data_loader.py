@@ -371,8 +371,9 @@ class LayoutDataset(Dataset):
         data["pe"] = self.get_positional_encoding(n_nodes, data["edge_index"])
 
         # we write the file uncompressed back if caching is enabled
-        if self.cache:
-            np.savez(cache_path, **data, allow_pickle=True)
+        # FIXME: Save again once the cache actually creates all fields
+        # if self.cache:
+        #     np.savez(cache_path, **data, allow_pickle=True)
 
         # we cut the data if we only want a subset of the configs
         if self.n_configs_per_file is not None:
