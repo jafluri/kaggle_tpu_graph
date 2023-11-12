@@ -315,17 +315,22 @@ class LayoutDataset(Dataset):
 
         # get the number of nodes
         n_nodes = len(data["node_opcode"])
-        mask = np.zeros(n_nodes, dtype=np.bool)
+        mask = np.zeros(n_nodes, dtype=bool)
 
         # get the configurable nodes
         mask[node_ids] = True
-        id_mask = mask.copy()
 
         # we add all edges that have lead to a configurable node
         new_edges = edge_index[:, mask[edge_index[1]]]
 
         # add all inputs to the mask
         mask[new_edges[0]] = True
+
+        # the edges still refer to the old node ids, we need to map them to the new ones
+        id_map = np.arange(n_nodes)
+        id_map[mask] = np.arange(mask.sum())
+        new_edges[0] = id_map[new_edges[0]]
+        new_edges[1] = id_map[new_edges[1]]
 
         # prune the data
         data["edge_index"] = new_edges
@@ -336,7 +341,7 @@ class LayoutDataset(Dataset):
         data["new_pe"] = data["new_pe"][mask]
 
         # new config ids are the indices of the config ids on the pruned mask
-        data["node_config_ids"] = np.where(id_mask[mask])[0]
+        data["node_config_ids"] = id_map[node_ids]
 
         return data
 
