@@ -516,6 +516,8 @@ class TPUGraphNetworkV2(nn.Module):
         n_projections: int = 15,
         embedding_dim: int = 32,
         lpe_embedding_dim: int = 32,
+        message_dim: int = 32,
+        linformer_dim: int = 32,
         embedding_version: str = "v2",
         **kwargs,
     ):
@@ -544,6 +546,8 @@ class TPUGraphNetworkV2(nn.Module):
         self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
         self.embedding_dim = embedding_dim
         self.lpe_embedding_dim = lpe_embedding_dim
+        self.message_dim = message_dim
+        self.linformer_dim = linformer_dim
 
         # the embedding layer
         if embedding_version == "v1":
@@ -574,13 +578,15 @@ class TPUGraphNetworkV2(nn.Module):
         self.lpe_sage_convs = nn.ModuleList()
         message_network_dims = [embedding_out] + message_network_dims
         for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim))
-            self.lpe_sage_convs.append(SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=16))
+            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim, message_dim=message_dim))
+            self.lpe_sage_convs.append(
+                SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=lpe_embedding_dim // 2)
+            )
 
         # for the last layer we add a linformer and a combination net
         in_dim = message_network_dims[-2]
         out_dim = message_network_dims[-1]
-        self.linformer = LinFormer(lpe_embedding_dim + in_dim, out_dim)
+        self.linformer = LinFormer(lpe_embedding_dim + in_dim, out_dim, key_dim=linformer_dim, query_dim=linformer_dim)
         self.combination_net = nn.Sequential(
             nn.Linear(2 * out_dim, out_dim),
             nn.SiLU(),
