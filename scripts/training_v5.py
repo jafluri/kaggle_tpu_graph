@@ -11,7 +11,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
-from tpu_graph.data import LayoutDataset
+from tpu_graph.data import LayoutDatasetV3 as LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
