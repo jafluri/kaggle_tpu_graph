@@ -607,60 +607,61 @@ class LayoutDatasetV2(LayoutDataset):
 
         return features, edge_index, config_runtime
 
-    class LayoutDatasetV3(LayoutDataset):
+
+class LayoutDatasetV3(LayoutDataset):
+    """
+    Same as V2 but no adapt and pruning
+    """
+
+    def __getitem__(self, idx):
         """
-        Same as V2 but no adapt and pruning
+        Loads a file into memory and returns a sample
+        :param idx: The index of the sample to return
+        :return: The sample
         """
 
-        def __getitem__(self, idx):
-            """
-            Loads a file into memory and returns a sample
-            :param idx: The index of the sample to return
-            :return: The sample
-            """
+        # get data and indices
+        data, indices = self.get_data_and_indices(idx)
 
-            # get data and indices
-            data, indices = self.get_data_and_indices(idx)
+        # read out the data for this graph (we copy because a subset will be logged)
+        node_feat = data["node_feat"].copy()
+        node_opcode = data["node_opcode"]
+        pe = data["pe"]
+        new_pe = data["new_pe"]
+        edge_index = data["edge_index"]
+        node_feat_input = data["node_feat_input"].copy()
 
-            # read out the data for this graph (we copy because a subset will be logged)
-            node_feat = data["node_feat"].copy()
-            node_opcode = data["node_opcode"]
-            pe = data["pe"]
-            new_pe = data["new_pe"]
-            edge_index = data["edge_index"]
-            node_feat_input = data["node_feat_input"].copy()
+        # mask the new features where there is no conv or dot
+        node_feat_input[(node_opcode != 26) & (node_opcode != 34)] = -2.0
+        node_feat_input = np.log(node_feat_input + 3.0)
 
-            # mask the new features where there is no conv or dot
-            node_feat_input[(node_opcode != 26) & (node_opcode != 34)] = -2.0
-            node_feat_input = np.log(node_feat_input + 3.0)
+        # we do everythin mod 128 (the TPU register length)
+        dim_features = np.concatenate(
+            [
+                np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0,
+                np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0,
+            ],
+            axis=1,
+        )
+        # log some of the features (this can include dim features)
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
-            # we do everythin mod 128 (the TPU register length)
-            dim_features = np.concatenate(
-                [
-                    np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0,
-                    np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0,
-                ],
-                axis=1,
-            )
-            # log some of the features (this can include dim features)
-            node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
+        # add node_feat and pe
+        node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
 
-            # add node_feat and pe
-            node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
+        # we divide by 5 to normalize the config features
+        config_feat = data["node_config_feat"][indices] / 5.0
+        node_config_ids = data["node_config_ids"]
 
-            # we divide by 5 to normalize the config features
-            config_feat = data["node_config_feat"][indices] / 5.0
-            node_config_ids = data["node_config_ids"]
+        # fill the config features
+        config_feat = fill_config_feat(len(node_feat), node_config_ids, config_feat)
 
-            # fill the config features
-            config_feat = fill_config_feat(len(node_feat), node_config_ids, config_feat)
+        # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
+        config_runtime = data["config_runtime"][indices]
 
-            # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
-            config_runtime = data["config_runtime"][indices]
+        # tile config_features such that axis 0 matches with the number of nodes
+        node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
+        node_feat = np.tile(node_feat, (self.list_size, 1, 1))
+        features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
 
-            # tile config_features such that axis 0 matches with the number of nodes
-            node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
-            node_feat = np.tile(node_feat, (self.list_size, 1, 1))
-            features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
-
-            return features, edge_index, config_runtime
+        return features, edge_index, config_runtime
