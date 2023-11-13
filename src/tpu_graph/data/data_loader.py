@@ -511,11 +511,15 @@ class LayoutDatasetV2(LayoutDataset):
         # read out the data for this graph (we copy because a subset will be logged)
         node_feat = data["node_feat"].copy()
         # the input features are loged + 3 because of padding values of -2
-        node_feat_input = np.log(data["node_feat_input"] + 3)
+        node_feat_input = data["node_feat_input"].copy()
         node_opcode = data["node_opcode"]
         pe = data["pe"]
         new_pe = data["new_pe"]
         edge_index = data["edge_index"]
+
+        # mask the new features where there is no conv or dot
+        node_feat_input[(node_opcode != 26) & (node_opcode != 34)] = -2.0
+        node_feat_input = np.log(node_feat_input + 3.0)
 
         # we do everythin mod 128 (the TPU register length)
         dim_features = np.concatenate(

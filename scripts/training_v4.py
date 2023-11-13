@@ -95,7 +95,7 @@ def train_network(rank, kwargs):
 
     logger.info("Loading the dataset for training")
     train_dataset = LayoutDataset(
-        [base_path.joinpath("train") for base_path in base_paths],
+        [base_path.joinpath("train") for base_path in base_paths] + [base_path.joinpath("valid") for base_path in base_paths],
         cache=kwargs["cache"],
         clear_cache=kwargs["clear_cache"],
         list_size=kwargs["list_size"],
