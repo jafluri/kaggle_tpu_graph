@@ -78,6 +78,7 @@ class LayoutDataset(Dataset):
         num_shards: int = 1,
         shard_id: int = 0,
         n_configs_per_file: int | None = None,
+        prune: bool = False,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -91,6 +92,7 @@ class LayoutDataset(Dataset):
         :param num_shards: The number of shards to use
         :param shard_id: The shard to use
         :param n_configs_per_file: The number of configs per file to use
+        :param prune: If True, the dataset is pruned such that only the configurable nodes and their inputs are used
         """
 
         # save the attributes
@@ -102,6 +104,7 @@ class LayoutDataset(Dataset):
         self.num_shards = num_shards
         self.shard_id = shard_id
         self.n_configs_per_file = n_configs_per_file
+        self.prune = prune
 
         # create the encoder
         self.encoder = AddRandomWalkPE(
@@ -299,6 +302,44 @@ class LayoutDataset(Dataset):
 
         return node_config_feat
 
+    def _prune_data(self, data: dict[str : np.ndarray]):
+        """
+        Prunes the data such that only the configurable nodes and their inputs are used
+        :param data: The data dict
+        :return: The same data dict with the pruned data
+        """
+
+        # get the edges and the node ids
+        edge_index = data["edge_index"]
+        node_ids = data["node_config_ids"]
+
+        # get the number of nodes
+        n_nodes = len(data["node_opcode"])
+        mask = np.zeros(n_nodes, dtype=np.bool)
+
+        # get the configurable nodes
+        mask[node_ids] = True
+        id_mask = mask.copy()
+
+        # we add all edges that have lead to a configurable node
+        new_edges = edge_index[:, mask[edge_index[1]]]
+
+        # add all inputs to the mask
+        mask[new_edges[0]] = True
+
+        # prune the data
+        data["edge_index"] = new_edges
+        data["node_feat"] = data["node_feat"][mask]
+        data["node_opcode"] = data["node_opcode"][mask]
+        data["node_feat_input"] = data["node_feat_input"][mask]
+        data["pe"] = data["pe"][mask]
+        data["new_pe"] = data["new_pe"][mask]
+
+        # new config ids are the indices of the config ids on the pruned mask
+        data["node_config_ids"] = np.where(id_mask[mask])[0]
+
+        return data
+
     def read_data(self, data: dict[str : np.ndarray]):
         """
         Reads out the datadict from the npz file into memory and adds the imaginary output node and creates the graph
@@ -342,6 +383,10 @@ class LayoutDataset(Dataset):
                     _data_dict["node_config_feat"] = _data["node_config_feat"][:]
                     _data_dict["config_runtime"] = _data["config_runtime"][:]
 
+                # prune the data if necessary
+                if self.prune:
+                    _data_dict = self._prune_data(_data_dict)
+
                 return _data_dict
             except Exception as e:
                 logger.error(f"Could not load {cache_path} because of {e}")
@@ -380,6 +425,10 @@ class LayoutDataset(Dataset):
             indices = data["indices"][: self.n_configs_per_file]
             data["node_config_feat"] = data["node_config_feat"][indices]
             data["config_runtime"] = data["config_runtime"][indices]
+
+        # prune the data if necessary
+        if self.prune:
+            data = self._prune_data(data)
 
         return data
 
