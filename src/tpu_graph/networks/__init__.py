@@ -3,6 +3,7 @@ from .networks import (
     TPUGraphNetwork,
     EmbeddingInputLayer,
     TPUGraphNetworkV2,
+    TPUGraphNetworkV3,
     SAGEConv,
 )
 
@@ -11,6 +12,7 @@ __all__ = [
     "TPUGraphNetworkSimple",
     "TPUGraphNetwork",
     "TPUGraphNetworkV2",
+    "TPUGraphNetworkV3",
     "EmbeddingInputLayer",
     "SAGEConv",
 ]

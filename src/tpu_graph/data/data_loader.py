@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES, MIN_VALS
+from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
@@ -799,3 +799,98 @@ class LayoutDatasetV4(LayoutDatasetV3):
         data["node_config_ids"] = node_config_ids
 
         return data
+
+
+class LayoutDatasetFinal(LayoutDataset):
+    def __getitem__(self, idx):
+        """
+        Loads a file into memory and returns a sample
+        :param idx: The index of the sample to return
+        :return: The sample
+        """
+
+        # get data and indices
+        data, indices = self.get_data_and_indices(idx)
+
+        # read out the data for this graph (we copy because a subset will be logged)
+        node_feat = data["node_feat"].copy()
+        node_opcode = data["node_opcode"]
+        pe = data["pe"]
+        new_pe = data["new_pe"]
+        edge_index = data["edge_index"]
+
+        # we do everythin mod 128 (the TPU register length)
+        dim_features = np.concatenate(
+            [np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0, np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0],
+            axis=1,
+        )
+
+        # log the node features
+        node_feat = np.log(node_feat + 5) - np.log(5)
+
+        # add node_feat and pe
+        node_feat = np.concatenate([node_feat, dim_features, pe, new_pe], axis=1)
+
+        # we divide by 5 to normalize the config features
+        config_feat = data["node_config_feat"][indices] / 5.0
+        node_config_ids = data["node_config_ids"]
+
+        # fill the config features
+        config_feat = fill_config_feat(len(node_feat), node_config_ids, config_feat)
+
+        # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
+        config_runtime = data["config_runtime"][indices]
+
+        # tile config_features such that axis 0 matches with the number of nodes
+        node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
+        node_feat = np.tile(node_feat, (self.list_size, 1, 1))
+        features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
+
+        # the selection indices
+        selection_indices = np.array([np.arange(len(node_config_ids)), node_config_ids])
+
+        return features, edge_index, selection_indices, config_runtime
+
+    @staticmethod
+    def collate_fn_tiles(tensors: list[tuple], dtype=torch.float32):
+        """
+        A custom collate function for the tiles dataset
+        :param tensors: A list of tuples that are returned by the dataset
+        :param dtype: The dtype to use for the tensors
+        :return: The collated output for the dataloader
+        """
+
+        # list for the collection
+        features = []
+        times = []
+        # for the connection matrices
+        edge_indices = []
+        edge_offset = 0
+        select_indices = []
+        select_offset = 0
+        # the individual length of the graphs
+        lengths = []
+
+        # unpack everything
+        for t in tensors:
+            assert len(t) == 4, "The length of the tensors must be 4"
+            node_feat, edge_index, select_index, config_runtime = t
+
+            # append the tensors that need to go through the network
+            features.append(node_feat)
+            times.append(config_runtime)
+            edge_indices.append(edge_index + edge_offset)
+            edge_offset += node_feat.shape[1]
+            select_indices.append(select_index + select_offset)
+            select_offset += select_index.shape[1]
+            lengths.append(select_index.shape[1])
+
+        # stack the tensors
+        features = torch.Tensor(np.concatenate(features, axis=1))
+        times = torch.tensor(np.stack(times, axis=0), dtype=dtype)
+
+        # the connection matrix
+        edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long)
+        select_indices = torch.tensor(np.concatenate(select_indices, axis=1), dtype=torch.long)
+
+        return features, lengths, times, (edge_indices, select_indices)
