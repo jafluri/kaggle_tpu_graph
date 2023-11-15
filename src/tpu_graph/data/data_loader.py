@@ -799,3 +799,9 @@ class LayoutDatasetV4(LayoutDatasetV3):
         data["node_config_ids"] = node_config_ids
 
         return data
+
+    def __getitem__(self, idx):
+        print("calling super")
+        features, edge_index, config_runtime = super().__getitem__(idx)
+        print(features.shape, edge_index.shape, config_runtime.shape)
+        return features, edge_index, config_runtime
