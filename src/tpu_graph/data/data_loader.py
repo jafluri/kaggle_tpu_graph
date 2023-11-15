@@ -320,8 +320,8 @@ class LayoutDataset(Dataset):
         # get the configurable nodes
         mask[node_ids] = True
 
-        # we add all edges that have lead to a configurable node
-        new_edges = edge_index[:, mask[edge_index[1]]]
+        # we add all edges that lead to a configurable node or are the output of a configurable node
+        new_edges = edge_index[:, mask[edge_index[1]] | mask[edge_index[0]]]
 
         # add all inputs to the mask
         mask[new_edges[0]] = True
@@ -369,7 +369,7 @@ class LayoutDataset(Dataset):
                 _data_dict["node_opcode"] = _data["node_opcode"][:]
                 _data_dict["edge_index"] = _data["edge_index"][:]
                 _data_dict["pe"] = _data["pe"][:]
-                _data_dict["new_pe"] = _data["new_pe"][:]
+                _data_dict["new_pe"] = _data["new_pe_long"][:]
                 _data_dict["node_feat_input"] = _data["node_feat_input"][:]
                 _data_dict["node_config_ids"] = _data["node_config_ids"][:]
 

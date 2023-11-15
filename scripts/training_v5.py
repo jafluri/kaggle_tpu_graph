@@ -141,12 +141,12 @@ def train_network(rank, kwargs):
         message_network_dims=[256, 256, 256],
         n_normal_features=140 + 30 + 16,
         n_dim_features=2 * 37,
-        n_lpe_features=64,
+        n_lpe_features=128,
         n_configs=18,
         embedding_dim=128,
         lpe_embedding_dim=64,
         message_dim=128,
-        linformer_dim=128,
+        linformer_dim=256,
         embedding_version="v2",
     )
 
