@@ -147,8 +147,8 @@ def train_network(rank, kwargs):
         n_configs=18,
         embedding_dim=128,
         lpe_embedding_dim=64,
-        message_dim=128,
-        linformer_dim=512,
+        message_dim=256,
+        linformer_dim=256,
         embedding_version="v2",
     )
 

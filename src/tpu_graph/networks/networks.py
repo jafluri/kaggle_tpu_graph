@@ -903,7 +903,7 @@ class TPUGraphNetworkV3(nn.Module):
             n_configs=n_configs,
             n_dim_features=n_dim_features,
             n_projections=n_configs,
-            layer_norm=False,
+            layer_norm=True,
         )
 
         # lpe initial projection
@@ -920,9 +920,9 @@ class TPUGraphNetworkV3(nn.Module):
                 nn.Sequential(
                     nn.Linear(in_dim, out_dim),
                     nn.SiLU(),
+                    nn.LayerNorm(out_dim),
                 )
             )
-        self.start_mlp.append(nn.LayerNorm(start_mlp_dims[-1]))
 
         # the message network
         self.feature_sage_convs = nn.ModuleList()
