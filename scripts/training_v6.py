@@ -148,6 +148,7 @@ def train_network(rank, kwargs):
         message_dim=128,
         linformer_dim=256,
         embedding_version="v2",
+        dropout=kwargs["dropout"],
     )
 
     # network to GPU

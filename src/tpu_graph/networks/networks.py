@@ -339,6 +339,7 @@ class TPUGraphNetwork(nn.Module):
         message_dim: int = 32,
         linformer_dim: int = 32,
         embedding_version: str = "v2",
+        dropout: float = 0.0,
         **kwargs,
     ):
         """
@@ -367,6 +368,7 @@ class TPUGraphNetwork(nn.Module):
         self.lpe_embedding_dim = lpe_embedding_dim
         self.message_dim = message_dim
         self.linformer_dim = linformer_dim
+        self.dropout = dropout
 
         # the embedding layer
         if embedding_version == "v1":
@@ -376,6 +378,10 @@ class TPUGraphNetwork(nn.Module):
         else:
             raise ValueError(f"Unknown embedding version {embedding_version}")
 
+        # the dropout layer
+        self.dropout_layer = nn.Dropout(dropout)
+
+        # embedding layer
         self.embedding_layer = emb_layer_class(
             in_channels=n_normal_features,
             out_channels=embedding_out,
@@ -468,6 +474,12 @@ class TPUGraphNetwork(nn.Module):
         op_code, features, dim_features, lpe_features, configs = torch.split(
             features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
         )
+
+        # we randomly drop some of the features
+        _, graph_dim, _ = features.shape
+        drop_mask = torch.ones((1, graph_dim, 1)).to(features.device)
+        drop_mask = self.dropout_layer(drop_mask)
+        features = features * drop_mask
 
         # embed the first column
         emb_features = self.embedding_layer(op_code, features, configs, dim_features)
@@ -708,6 +720,7 @@ class TPUGraphNetworkSimple(nn.Module):
         embedding_version: str = "v2",
         num_embeddings: int | None = None,
         layer_norm: bool = True,
+        dropout: float = 0.0,
         **kwargs,
     ):
         """
@@ -718,6 +731,11 @@ class TPUGraphNetworkSimple(nn.Module):
         :param n_dim_features: The number of dimension features
         :param n_lpe_features: The number of LPE features
         :param n_configs: The number of configurations
+        :param embedding_dim: The dimension of the embedding
+        :param embedding_version: The version of the embedding layer
+        :param num_embeddings: The number of embeddings
+        :param layer_norm: Whether to use layer norm or not
+        :param dropout: The dropout rate
         :param kwargs: Additional arguments
         """
 
@@ -733,6 +751,7 @@ class TPUGraphNetworkSimple(nn.Module):
         self.n_configs = n_configs
         self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
         self.embedding_dim = embedding_dim
+        self.dropout_rate = dropout
 
         # the embedding layer
         if embedding_version == "v1":
@@ -752,6 +771,9 @@ class TPUGraphNetworkSimple(nn.Module):
             n_projections=n_configs,
             layer_norm=layer_norm,
         )
+
+        # the dropout layer
+        self.dropout = nn.Dropout(dropout)
 
         # the message network is a simple MLP
         message_network_dims = [embedding_out] + message_network_dims
