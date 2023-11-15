@@ -1,5 +1,7 @@
 import os
+from collections import defaultdict
 from pathlib import Path
+from zipfile import ZipFile
 
 import numba as nb
 import numpy as np
@@ -11,7 +13,6 @@ from tpu_graph import logger
 from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
-from zipfile import ZipFile
 
 
 @nb.njit(nb.float32[:, :, :](nb.int64, nb.int64[:], nb.float32[:, :, :]))
@@ -671,3 +672,130 @@ class LayoutDatasetV3(LayoutDataset):
         features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
 
         return features, edge_index, config_runtime
+
+
+class LayoutDatasetV4(LayoutDatasetV3):
+    def _prune_data(self, data: dict[str : np.ndarray]):
+        # read out the data
+        node_config_ids = data["node_config_ids"]
+        edge_index = data["edge_index"]
+
+        # get a set with all important node
+        node_set = set(node_config_ids)
+
+        # create a dict where each node has its input and outputs
+        graph_dict = defaultdict(lambda: defaultdict(set))
+
+        # cycle through all edges
+        for i, o in edge_index.T:
+            graph_dict[o]["inputs"].add(i)
+            graph_dict[i]["outputs"].add(o)
+
+        # function to merge two nodes
+        def merge_nodes(graph_dict, i, j):
+            """
+            Merges two nodes i, j -> i of a given graph_dict
+            """
+
+            # redirect all nodes that have j as output to i
+            for node_in in graph_dict[j]["inputs"]:
+                graph_dict[node_in]["outputs"].remove(j)
+                if node_in != i:
+                    graph_dict[node_in]["outputs"].add(i)
+                    graph_dict[i]["inputs"].add(node_in)
+
+            # all outputs of j are now outputs of i
+            for node_out in graph_dict[j]["outputs"]:
+                graph_dict[node_out]["inputs"].remove(j)
+                if node_out != i:
+                    graph_dict[node_out]["inputs"].add(i)
+                    graph_dict[i]["outputs"].add(node_out)
+
+            del graph_dict[j]
+
+        # merge all nodes that are not in the node set
+        merged = []
+        while True:
+            # get the current start node
+            current_node = None
+            for k in graph_dict.keys():
+                if k not in node_set and k not in merged:
+                    current_node = k
+            if current_node is None:
+                break
+
+            # merge all nodes connected to the start node
+            while True:
+                merge_list = []
+                for i in graph_dict[current_node]["inputs"]:
+                    if i not in node_set:
+                        merge_list.append(i)
+                if len(merge_list) == 0:
+                    break
+
+                for o in graph_dict[current_node]["outputs"]:
+                    if o not in node_set:
+                        merge_list.append(o)
+                for m in merge_list:
+                    merge_nodes(graph_dict, current_node, m)
+
+            # mark as merged
+            merged.append(current_node)
+
+        # get all dummy nodes
+        dummies = []
+        for k in graph_dict.keys():
+            if k not in node_set:
+                dummies.append(k)
+        num_dummies = len(dummies)
+
+        # we create a map old_index -> new_index
+        index_map = {}
+        new_config_ids = dummies + list(node_config_ids)
+        for new_id, old_id in enumerate(new_config_ids):
+            index_map[old_id] = new_id
+
+        # create the new edges
+        new_edges = []
+        for k, v in graph_dict.items():
+            for i in v["inputs"]:
+                new_edges.append([index_map[i], index_map[k]])
+            for o in v["outputs"]:
+                new_edges.append([index_map[k], index_map[o]])
+        new_edges = np.array(new_edges).T
+
+        # set the indices
+        data["edge_index"] = new_edges
+
+        # features, set dummies to 0
+        feat = data["node_feat"][new_config_ids]
+        feat[:num_dummies] = 0.0
+
+        # opcode, set dummies to MAX_OP_CODE
+        opcode = data["node_opcode"][new_config_ids]
+        opcode[:num_dummies] = MAX_OP_CODE - 1
+
+        # pe, set dummies to 0
+        pe = data["pe"][new_config_ids]
+        pe[:num_dummies] = 0.0
+
+        # new_pe, set dummies to 0
+        new_pe = data["new_pe"][new_config_ids]
+        new_pe[:num_dummies] = 0.0
+
+        # node_feat_input, set dummies to -2
+        feat_input = data["node_feat_input"][new_config_ids]
+        feat_input[:num_dummies] = -2.0
+
+        # node_config_ids
+        node_config_ids = np.arange(len(new_config_ids)) + num_dummies
+
+        # set the data
+        data["node_feat"] = feat
+        data["node_opcode"] = opcode
+        data["pe"] = pe
+        data["new_pe"] = new_pe
+        data["node_feat_input"] = feat_input
+        data["node_config_ids"] = node_config_ids
+
+        return data
