@@ -986,7 +986,10 @@ class TPUGraphNetworkV3(nn.Module):
         # build the connection matrix
         with torch.no_grad():
             # unpack
-            edge_index, select_index = torch.split(indices, [sum(edge_lengths), sum(index_lengths)], dim=1)
+            n_elements = indices.shape[1]
+            edge_index, select_index = torch.split(
+                indices, [n_elements - sum(index_lengths), sum(index_lengths)], dim=1
+            )
             selection_matrix = torch.sparse_coo_tensor(
                 select_index,
                 torch.ones(select_index.shape[1]).to(select_index.device),

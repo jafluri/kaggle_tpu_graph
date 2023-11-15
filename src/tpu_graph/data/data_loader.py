@@ -887,7 +887,7 @@ class LayoutDatasetFinal(LayoutDataset):
             times.append(config_runtime)
             edge_indices.append(edge_index + edge_offset)
             edge_offset += node_feat.shape[1]
-            edge_lengths.append(features.shape[1])
+            edge_lengths.append(node_feat.shape[1])
             select_indices.append(select_index + select_offset)
             select_offset += select_index.shape[1]
             index_lengths.append(select_index.shape[1])
