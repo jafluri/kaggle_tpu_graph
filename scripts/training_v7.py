@@ -59,7 +59,6 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
-            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -138,9 +137,11 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetworkV3(
         embedding_out=512,
-        start_mlp_dims=[512, 512],
+        start_mlp_dims=[
+            512,
+        ],
         message_network_dims=[512],
-        final_mlp_dims=[512, 512],
+        final_mlp_dims=[512, 512, 512],
         n_normal_features=140 + 30 + 16,
         n_dim_features=2 * 37,
         n_lpe_features=128,

@@ -947,7 +947,7 @@ class TPUGraphNetworkV3(nn.Module):
             )
 
         # last mlp to fold in the final lpe features
-        final_mlp_dims = [message_network_dims[-1] + lpe_embedding_dim] + final_mlp_dims
+        final_mlp_dims = [message_network_dims[-1] + lpe_embedding_dim + n_configs] + final_mlp_dims
         self.final_mlp = nn.ModuleList()
         for i, (in_dim, out_dim) in enumerate(zip(final_mlp_dims[:-1], final_mlp_dims[1:])):
             self.final_mlp.append(
@@ -1054,7 +1054,7 @@ class TPUGraphNetworkV3(nn.Module):
             emb_features = combi_net(emb_features)
 
         # add the current LPE features to the features
-        emb_features = torch.cat([lpe_features, emb_features], dim=-1)
+        emb_features = torch.cat([lpe_features, emb_features, configs], dim=-1)
 
         # apply the selection matrix
         list_dim, graph_dim, feature_dim = emb_features.shape
