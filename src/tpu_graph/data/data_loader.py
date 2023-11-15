@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES
+from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES, MIN_VALS
 from tpu_graph.utils.random_walk_pe import AddRandomWalkPE
 from tqdm import tqdm
 
@@ -583,7 +583,7 @@ class LayoutDatasetV2(LayoutDataset):
             axis=1,
         )
         # log some of the features (this can include dim features)
-        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
+        node_feat = np.log(node_feat + MIN_VALS + 1)
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)

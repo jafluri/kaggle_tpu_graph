@@ -134,10 +134,10 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetworkSimple(
         embedding_out=512,
-        message_network_dims=[512, 512, 512, 512],
+        message_network_dims=[512, 512, 512, 512, 512],
         n_normal_features=140 + 30 + 16,
         n_dim_features=2 * 37,
-        n_lpe_features=64,
+        n_lpe_features=128,
         n_configs=18,
         embedding_dim=128,
         embedding_version="v2",
