@@ -842,7 +842,7 @@ class LayoutDatasetV4(LayoutDataset):
         config_feat = data["node_config_feat"][indices] / 5.0
         node_config_ids = data["node_config_ids"]
         print("Read config features")
-        print(config_feat.shape)
+        print(node_feat.shape)
         print(node_config_ids.shape)
         print(config_feat.shape)
 
