@@ -323,8 +323,9 @@ class LayoutDataset(Dataset):
         # we add all edges that lead to a configurable node or are the output of a configurable node
         new_edges = edge_index[:, mask[edge_index[1]] | mask[edge_index[0]]]
 
-        # add all inputs to the mask
+        # add everything to mask
         mask[new_edges[0]] = True
+        mask[new_edges[1]] = True
 
         # the edges still refer to the old node ids, we need to map them to the new ones
         id_map = np.arange(n_nodes)
