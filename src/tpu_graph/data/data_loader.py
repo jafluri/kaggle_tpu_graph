@@ -893,4 +893,4 @@ class LayoutDatasetFinal(LayoutDataset):
         edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long)
         select_indices = torch.tensor(np.concatenate(select_indices, axis=1), dtype=torch.long)
 
-        return features, lengths, times, (edge_indices, select_indices)
+        return features, lengths, times, torch.concatenate([edge_indices, select_indices], dim=1)

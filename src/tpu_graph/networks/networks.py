@@ -964,7 +964,7 @@ class TPUGraphNetworkV3(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        indices: tuple[torch.Tensor, torch.Tensor],
+        indices: torch.Tensor,
         lengths: list[int],
     ):
         """
@@ -981,7 +981,8 @@ class TPUGraphNetworkV3(nn.Module):
         # build the connection matrix
         with torch.no_grad():
             # unpack
-            edge_index, select_index = indices
+            _, n_elements = indices.shape
+            edge_index, select_index = torch.split(indices, [n_elements - sum(lengths), sum(lengths)], dim=1)
             selection_matrix = torch.sparse_coo_tensor(
                 select_index,
                 torch.ones(select_index.shape[1]).to(select_index.device),
