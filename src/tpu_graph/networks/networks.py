@@ -1053,6 +1053,9 @@ class TPUGraphNetworkV3(nn.Module):
             emb_features = torch.cat([sage_features, linformer_features], dim=-1)
             emb_features = combi_net(emb_features)
 
+        # add the current LPE features to the features
+        emb_features = torch.cat([lpe_features, emb_features], dim=-1)
+
         # apply the selection matrix
         list_dim, graph_dim, feature_dim = emb_features.shape
         emb_features = emb_features.transpose(0, 1).reshape(graph_dim, list_dim * feature_dim)
@@ -1061,7 +1064,6 @@ class TPUGraphNetworkV3(nn.Module):
         emb_features = emb_features.reshape(-1, list_dim, feature_dim).transpose(0, 1)
 
         # final mlp
-        emb_features = torch.cat([lpe_features, emb_features], dim=-1)
         for layer in self.final_mlp:
             emb_features = layer(emb_features)
 
