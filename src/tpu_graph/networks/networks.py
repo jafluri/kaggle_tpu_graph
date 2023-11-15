@@ -1057,7 +1057,8 @@ class TPUGraphNetworkV3(nn.Module):
         list_dim, graph_dim, feature_dim = emb_features.shape
         emb_features = emb_features.transpose(0, 1).reshape(graph_dim, list_dim * feature_dim)
         emb_features = torch.sparse.mm(selection_matrix, emb_features)
-        emb_features = emb_features.reshape(graph_dim, list_dim, feature_dim).transpose(0, 1)
+        # graph is now reduced
+        emb_features = emb_features.reshape(-1, list_dim, feature_dim).transpose(0, 1)
 
         # final mlp
         emb_features = torch.cat([lpe_features, emb_features], dim=-1)
