@@ -965,7 +965,7 @@ class TPUGraphNetworkV3(nn.Module):
         self,
         features: torch.Tensor,
         indices: torch.Tensor,
-        lengths: list[int],
+        lengths: tuple[list[int], list[int]],
     ):
         """
         Forward pass of the network
@@ -976,13 +976,17 @@ class TPUGraphNetworkV3(nn.Module):
         """
 
         # create and index for the scatter sum
-        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to(features.device)
+        edge_lengths, index_lengths = lengths
+        index = (
+            torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(index_lengths)]))
+            .long()
+            .to(features.device)
+        )
 
         # build the connection matrix
         with torch.no_grad():
             # unpack
-            _, n_elements = indices.shape
-            edge_index, select_index = torch.split(indices, [n_elements - sum(lengths), sum(lengths)], dim=1)
+            edge_index, select_index = torch.split(indices, [sum(edge_lengths), sum(index_lengths)], dim=1)
             selection_matrix = torch.sparse_coo_tensor(
                 select_index,
                 torch.ones(select_index.shape[1]).to(select_index.device),
@@ -1040,7 +1044,7 @@ class TPUGraphNetworkV3(nn.Module):
             lpe_features = lpe_sage_conv(lpe_features, connection_matrix_in, connection_matrix_out)
 
             # apply the linformer
-            linformer_features = linformer(emb_features, lengths)
+            linformer_features = linformer(emb_features, edge_lengths)
 
             # concatenate and combine
             emb_features = torch.cat([sage_features, linformer_features], dim=-1)

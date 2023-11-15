@@ -874,7 +874,8 @@ class LayoutDatasetFinal(LayoutDataset):
         select_indices = []
         select_offset = 0
         # the individual length of the graphs
-        lengths = []
+        edge_lengths = []
+        index_lengths = []
 
         # unpack everything
         for t in tensors:
@@ -886,9 +887,10 @@ class LayoutDatasetFinal(LayoutDataset):
             times.append(config_runtime)
             edge_indices.append(edge_index + edge_offset)
             edge_offset += node_feat.shape[1]
+            edge_lengths.append(features.shape[1])
             select_indices.append(select_index + select_offset)
             select_offset += select_index.shape[1]
-            lengths.append(select_index.shape[1])
+            index_lengths.append(select_index.shape[1])
 
         # stack the tensors
         features = torch.Tensor(np.concatenate(features, axis=1))
@@ -898,4 +900,4 @@ class LayoutDatasetFinal(LayoutDataset):
         edge_indices = torch.tensor(np.concatenate(edge_indices, axis=1), dtype=torch.long)
         select_indices = torch.tensor(np.concatenate(select_indices, axis=1), dtype=torch.long)
 
-        return features, lengths, times, torch.concatenate([edge_indices, select_indices], dim=1)
+        return features, [edge_lengths, index_lengths], times, torch.concatenate([edge_indices, select_indices], dim=1)
