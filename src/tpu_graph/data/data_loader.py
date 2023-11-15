@@ -851,7 +851,9 @@ class LayoutDatasetV4(LayoutDataset):
         print("Read config runtime")
 
         # tile config_features such that axis 0 matches with the number of nodes
-        print(node_opcode.shape, node_feat.shape, config_feat.shape)
+        print(node_feat.shape)
+        print(config_feat.shape)
+        print(node_opcode.shape)
         node_opcode = np.tile(node_opcode[:, None], (self.list_size, 1, 1))
         node_feat = np.tile(node_feat, (self.list_size, 1, 1))
         features = np.concatenate([node_opcode, node_feat, config_feat], axis=2)
