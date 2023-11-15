@@ -137,7 +137,7 @@ def train_network(rank, kwargs):
 
     network = TPUGraphNetwork(
         embedding_out=512,
-        message_network_dims=[256, 256, 256],
+        message_network_dims=[256 + 128, 256, 256, 256, 256],
         n_normal_features=140 + 30 + 16,
         n_dim_features=2 * 37,
         n_lpe_features=128,
@@ -145,7 +145,7 @@ def train_network(rank, kwargs):
         embedding_dim=128,
         lpe_embedding_dim=64,
         message_dim=128,
-        linformer_dim=256,
+        linformer_dim=128,
         embedding_version="v2",
         dropout=kwargs["dropout"],
     )

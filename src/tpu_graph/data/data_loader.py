@@ -683,6 +683,13 @@ class LayoutDatasetV4(LayoutDatasetV3):
         # get a set with all important node
         node_set = set(node_config_ids)
 
+        # set that contains all configs ids and its input and output nodes
+        extended_node_set = set(node_config_ids)
+        for i, o in edge_index.T:
+            if i in node_config_ids or o in node_config_ids:
+                extended_node_set.add(i)
+                extended_node_set.add(o)
+
         # create a dict where each node has its input and outputs
         graph_dict = defaultdict(lambda: defaultdict(set))
 
@@ -719,7 +726,7 @@ class LayoutDatasetV4(LayoutDatasetV3):
             # get the current start node
             current_node = None
             for k in graph_dict.keys():
-                if k not in node_set and k not in merged:
+                if k not in extended_node_set and k not in merged:
                     current_node = k
             if current_node is None:
                 break
@@ -728,13 +735,13 @@ class LayoutDatasetV4(LayoutDatasetV3):
             while True:
                 merge_list = []
                 for i in graph_dict[current_node]["inputs"]:
-                    if i not in node_set:
+                    if i not in extended_node_set:
                         merge_list.append(i)
                 if len(merge_list) == 0:
                     break
 
                 for o in graph_dict[current_node]["outputs"]:
-                    if o not in node_set:
+                    if o not in extended_node_set:
                         merge_list.append(o)
                 for m in merge_list:
                     merge_nodes(graph_dict, current_node, m)
