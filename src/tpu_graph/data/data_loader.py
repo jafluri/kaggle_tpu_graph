@@ -583,7 +583,7 @@ class LayoutDatasetV2(LayoutDataset):
             axis=1,
         )
         # log some of the features (this can include dim features)
-        node_feat = np.log(node_feat + MIN_VALS + 1)
+        node_feat = np.log(node_feat + 5) - np.log(5)
 
         # add node_feat and pe
         node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
