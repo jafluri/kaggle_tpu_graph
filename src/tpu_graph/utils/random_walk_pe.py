@@ -1,12 +1,13 @@
 from typing import Any, Optional
 
+import numpy as np
 import torch
 from torch_geometric.data import Data
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.typing import SparseTensor
-from torch_geometric.utils import (
-    get_self_loop_attr,
-)
+from torch_geometric.utils import get_self_loop_attr, add_self_loops
+
+from tpu_graph import logger
 
 
 def add_node_attr(data: Data, value: Any, attr_name: Optional[str] = None) -> Data:
@@ -68,3 +69,57 @@ class AddRandomWalkPE(BaseTransform):
 
         data = add_node_attr(data, pe, attr_name=self.attr_name)
         return data
+
+
+def compute_pe(
+    edge_index: np.ndarray, n_nodes: int, device: str | int = "cpu", num_lpe_vecs: int = 112, symmetric: bool = True
+):
+    """
+    Computes the positional encoding for the given graph, this function is a bit bloated such that we can catch
+    cases where the GPU runs out of memory and we can fall back to the CPU
+    :param edge_index: The edge index of the graph
+    :param n_nodes: The number of nodes of the graph
+    :param device: The device to use for the matrix multiplications, defaults to CPU
+    :param num_lpe_vecs: The number of local positional encoding vectors to use
+    :param symmetric: Whether to use symmetric adjacency matrix or not (directed undirected)
+    :return: The positional encoding
+    """
+
+    # create the data
+    if symmetric:
+        edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
+    edge_index = torch.tensor(edge_index, dtype=torch.long)
+    edge_index = add_self_loops(edge_index, num_nodes=n_nodes)[0]
+    x = torch.ones((n_nodes, 1))
+    data = Data(x=x, edge_index=edge_index)
+
+    # prep
+    num_nodes = data.num_nodes
+    edge_index, edge_weight = data.edge_index, data.edge_weight
+
+    adj = SparseTensor.from_edge_index(edge_index, edge_weight, sparse_sizes=(num_nodes, num_nodes))
+
+    # Compute D^{-1} A:
+    deg_inv = 1.0 / adj.sum(dim=1)
+    deg_inv[deg_inv == float("inf")] = 0
+    adj = adj * deg_inv.view(-1, 1)
+
+    # get the pe
+    try:
+        out_gpu = adj.to_dense().to(device)
+        adj_gpu = adj.to_torch_sparse_coo_tensor().to(device)
+        pe_list = []
+        for i in range(num_lpe_vecs):
+            out_gpu = torch.sparse.mm(adj_gpu, out_gpu)
+            pe_list.append(torch.diag(out_gpu))
+    except Exception as e:
+        # check if the device was a GPU
+        if torch.device(device).type == "cuda":
+            logger.warning("Could not compute PE on GPU, trying CPU")
+            return compute_pe(edge_index, n_nodes, device="cpu", num_lpe_vecs=num_lpe_vecs, symmetric=symmetric)
+        else:
+            raise e
+
+    # stack and return
+    pe = torch.stack(pe_list, dim=1)
+    return pe.cpu().numpy()
