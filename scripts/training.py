@@ -135,8 +135,8 @@ def train_tile_network(**kwargs):
     # )
     message_network = nn.Sequential(
         SAGEConv(256, 128),
-        GPSConv(128, 128),
-        GPSConv(128, 128),
+        SAGEConv(128, 128),
+        SAGEConv(128, 128),
         SAGEConv(128, 128),
     )
     projection_network = nn.Linear(128, 1)
