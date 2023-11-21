@@ -74,7 +74,7 @@ def train_network(rank, kwargs):
                 "reload_configs": kwargs["reload_configs"],
                 "n_configs_per_file": kwargs["n_configs_per_file"],
                 "n_configs_val": kwargs["n_configs_val"],
-                "prune": kwargs["pruning"]
+                "prune": kwargs["pruning"],
             },
         )
 
@@ -138,7 +138,7 @@ def train_network(rank, kwargs):
         n_pe_features=128,
         n_configs=18,
         embedding_dim=128,
-        lpe_embedding_dim=64,
+        pe_embedding_dim=64,
         message_dim=128,
         linformer_dim=128,
     )
@@ -301,7 +301,7 @@ def train_network(rank, kwargs):
     help="The path to the data, for multiple datasets, one can specify this argument multiple times."
     "Each directory should contain a train, valid and test directory.",
     multiple=True,
-    required=True
+    required=True,
 )
 @click.option(
     "--save_path",

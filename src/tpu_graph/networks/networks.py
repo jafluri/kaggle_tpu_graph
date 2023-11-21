@@ -223,6 +223,7 @@ class TPUGraphNetwork(nn.Module):
         message_network_dims: list[int],
         n_normal_features: int,
         n_pe_features: int,
+        n_configs: int,
         embedding_dim: int = 32,
         pe_embedding_dim: int = 32,
         message_dim: int = 32,
@@ -249,6 +250,7 @@ class TPUGraphNetwork(nn.Module):
         self.message_network_dims = message_network_dims
         self.n_normal_features = n_normal_features
         self.n_lpe_features = n_pe_features
+        self.n_configs = n_configs
         self.in_channels = n_normal_features + n_pe_features + 1
         self.embedding_dim = embedding_dim
         self.lpe_embedding_dim = pe_embedding_dim
