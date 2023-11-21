@@ -299,10 +299,9 @@ class LayoutDataset(Dataset):
 
         # readout
         node_feat = data["node_feat"]
-        node_feat_input = data["node_feat_input"]
         node_opcode = data["node_opcode"]
-        pe = data["pe"]
-        new_pe = data["new_pe"]
+        pe = data["pe_asym"]
+        new_pe = data["pe_sym"]
 
         # read the config ids
         node_config_ids = data["node_config_ids"]
@@ -312,7 +311,6 @@ class LayoutDataset(Dataset):
 
         # filter the data
         node_feat = node_feat[node_config_ids]
-        node_feat_input = node_feat_input[node_config_ids]
         node_opcode = node_opcode[node_config_ids]
         pe = pe[node_config_ids]
         new_pe = new_pe[node_config_ids]
@@ -322,10 +320,9 @@ class LayoutDataset(Dataset):
 
         # update the data
         data["node_feat"] = node_feat
-        data["node_feat_input"] = node_feat_input
         data["node_opcode"] = node_opcode
-        data["pe"] = pe
-        data["new_pe"] = new_pe
+        data["pe_asym"] = pe
+        data["pe_sym"] = new_pe
         data["edge_index"] = edge_index
         data["node_config_ids"] = node_config_ids
 
@@ -366,9 +363,8 @@ class LayoutDataset(Dataset):
         data["edge_index"] = new_edges
         data["node_feat"] = data["node_feat"][mask]
         data["node_opcode"] = data["node_opcode"][mask]
-        data["node_feat_input"] = data["node_feat_input"][mask]
-        data["pe"] = data["pe"][mask]
-        data["new_pe"] = data["new_pe"][mask]
+        data["pe_asym"] = data["pe_asym"][mask]
+        data["pe_sym"] = data["pe_sym"][mask]
 
         # new config ids are the indices of the config ids on the pruned mask
         data["node_config_ids"] = id_map[node_ids]
@@ -490,16 +486,12 @@ class LayoutDataset(Dataset):
         opcode[:num_dummies] = MAX_OP_CODE - 1
 
         # pe, set dummies to 0
-        pe = data["pe"][old_ids]
+        pe = data["pe_asym"][old_ids]
         pe[:num_dummies] = 0.0
 
         # new_pe, set dummies to 0
-        new_pe = data["new_pe"][old_ids]
+        new_pe = data["pe_sym"][old_ids]
         new_pe[:num_dummies] = 0.0
-
-        # node_feat_input, set dummies to -2
-        feat_input = data["node_feat_input"][old_ids]
-        feat_input[:num_dummies] = -2.0
 
         # node_config_ids
         node_config_ids = np.arange(len(node_config_ids)) + num_dummies
@@ -507,9 +499,8 @@ class LayoutDataset(Dataset):
         # set the data
         data["node_feat"] = feat
         data["node_opcode"] = opcode
-        data["pe"] = pe
-        data["new_pe"] = new_pe
-        data["node_feat_input"] = feat_input
+        data["pe_asym"] = pe
+        data["pe_sym"] = new_pe
         data["node_config_ids"] = node_config_ids
 
         return data
