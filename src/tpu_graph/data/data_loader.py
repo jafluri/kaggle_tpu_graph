@@ -606,17 +606,25 @@ class LayoutDataset(Dataset):
         pe = data["pe"]
         new_pe = data["new_pe"]
         edge_index = data["edge_index"]
+        node_feat_input = data["node_feat_input"].copy()
+
+        # mask the new features where there is no conv or dot
+        node_feat_input[(node_opcode != 26) & (node_opcode != 34)] = -2.0
+        node_feat_input = np.log(node_feat_input + 3.0)
 
         # we do everythin mod 128 (the TPU register length)
         dim_features = np.concatenate(
-            [np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0, np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0],
+            [
+                np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0,
+                np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0,
+            ],
             axis=1,
         )
         # log some of the features (this can include dim features)
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
-        node_feat = np.concatenate([node_feat, dim_features, pe, new_pe], axis=1)
+        node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0
