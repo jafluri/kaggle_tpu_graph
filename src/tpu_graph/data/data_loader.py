@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 from tpu_graph import logger
-from tpu_graph.constants import LOG_FEATURES, MAX_OP_CODE, DIM_FEATURES
+from tpu_graph.constants import MAX_OP_CODE
 from tqdm import tqdm
 
 
@@ -77,6 +77,7 @@ class LayoutDataset(Dataset):
         shard_id: int = 0,
         n_configs_per_file: int | None = None,
         prune: None | Literal["v1", "v2", "v3"] = None,
+        log_features: bool = True,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -92,6 +93,7 @@ class LayoutDataset(Dataset):
                         v2: Prune all nodes besides the configurable ones and their inputs/outputs
                         v3: Prune all nodes besides the configurable ones, their inputs/outputs and merge the rest ïnto
                             virtual nodes
+        :param log_features: If True, the features are logged
         """
 
         # save the attributes
@@ -101,6 +103,7 @@ class LayoutDataset(Dataset):
         self.shard_id = shard_id
         self.n_configs_per_file = n_configs_per_file
         self.prune = prune
+        self.log = log_features
 
         # get all the files
         if not isinstance(data_path, list):
@@ -526,9 +529,8 @@ class LayoutDataset(Dataset):
         _data_dict["node_feat"] = data["node_feat"][:]
         _data_dict["node_opcode"] = data["node_opcode"][:]
         _data_dict["edge_index"] = data["edge_index"][:]
-        _data_dict["pe"] = data["pe"][:]
-        _data_dict["new_pe"] = data["new_pe_long"][:]
-        _data_dict["node_feat_input"] = data["node_feat_input"][:]
+        _data_dict["pe_asym"] = data["pe_asym"][:]
+        _data_dict["pe_sym"] = data["pe_sym"][:]
         _data_dict["node_config_ids"] = data["node_config_ids"][:]
 
         # we only get a subset of the config features and runtimes
@@ -601,30 +603,16 @@ class LayoutDataset(Dataset):
         data, indices = self.get_data_and_indices(idx)
 
         # read out the data for this graph (we copy because a subset will be logged)
-        node_feat = data["node_feat"].copy()
+        node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        pe = data["pe"]
-        new_pe = data["new_pe"]
+        pe = data["pe_asym"]
+        new_pe = data["pe_sym"]
         edge_index = data["edge_index"]
-        node_feat_input = data["node_feat_input"].copy()
-
-        # mask the new features where there is no conv or dot
-        node_feat_input[(node_opcode != 26) & (node_opcode != 34)] = -2.0
-        node_feat_input = np.log(node_feat_input + 3.0)
-
-        # we do everythin mod 128 (the TPU register length)
-        dim_features = np.concatenate(
-            [
-                np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0,
-                np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0,
-            ],
-            axis=1,
-        )
-        # log some of the features (this can include dim features)
-        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
 
         # add node_feat and pe
-        node_feat = np.concatenate([node_feat, node_feat_input, dim_features, pe, new_pe], axis=1)
+        if self.log:
+            node_feat = np.log(node_feat + 5.0) - np.log(5.0)
+        node_feat = np.concatenate([node_feat, pe, new_pe], axis=1)
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0
@@ -633,7 +621,7 @@ class LayoutDataset(Dataset):
         # fill the config features
         config_feat = fill_config_feat(len(node_feat), node_config_ids, config_feat)
 
-        # we normalize the runtime and multiply with the first to get quasi normalized time in nanoseconds
+        # get the runtime
         config_runtime = data["config_runtime"][indices]
 
         # tile config_features such that axis 0 matches with the number of nodes

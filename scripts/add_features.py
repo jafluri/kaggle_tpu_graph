@@ -56,8 +56,7 @@ def add_features(
         input_features, new_features = get_additional_features(m, npz_data, padding=padding)
 
         # add the new features
-        npz_data["node_feat_input"] = input_features
-        npz_data["node_feat_new"] = new_features
+        npz_data["node_feat"] = np.concatenate([npz_data["node_feat"], input_features, new_features], axis=1)
 
         # get the pe
         logger.info("Computing positional encodings")
@@ -70,8 +69,8 @@ def add_features(
         )
 
         # add the pe
-        npz_data["pe"] = pe_asym
-        npz_data["new_pe"] = pe_sym
+        npz_data["pe_asym"] = pe_asym
+        npz_data["pe_sym"] = pe_sym
 
         # save the file with cached.npz
         logger.info("Saving file")
