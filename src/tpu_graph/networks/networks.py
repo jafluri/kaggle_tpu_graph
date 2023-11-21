@@ -16,111 +16,7 @@ class EmbeddingInputLayer(nn.Module):
         out_channels: int,
         emb_size: int = 32,
         num_embeddings: int = 128,
-        n_configs: int = 18,
-        n_projections: int = 18,
-        n_dim_features: int = 74,
-    ):
-        """
-        Inits the layer
-        :param in_channels: The number of input channels without the embedding
-        :param out_channels: The number of output channels after the projection
-        :param emb_size: The size of the embedding
-        :param num_embeddings: The number of embeddings
-        :param n_configs: The number of configurations
-        :param n_projections: The number of projections
-        """
-
-        # this line is mandatory for all subclasses
-        super().__init__()
-
-        # save the attributes
-        self.emb_size = emb_size
-        self.num_embeddings = num_embeddings
-        self.n_configs = n_configs
-        self.n_projections = n_projections
-        self.n_dim_features = n_dim_features
-
-        # some dims
-        self.full_dim = in_channels + emb_size + n_projections
-
-        # init the embedding
-        self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
-        self.projections = nn.Linear(n_configs, self.n_dim_features * n_projections, bias=True)
-
-        # config mlp
-        self.config_mlp = nn.Sequential(
-            nn.Linear(n_configs, n_configs, bias=True),
-            nn.SiLU(),
-            nn.Linear(n_configs, n_configs, bias=True),
-            nn.SiLU(),
-        )
-        self.dim_mlp = nn.Sequential(
-            nn.Linear(n_dim_features, n_dim_features, bias=True),
-            nn.SiLU(),
-            nn.Linear(n_dim_features, n_dim_features, bias=True),
-            nn.SiLU(),
-        )
-
-        # the other layers
-        self.mlp = nn.Sequential(
-            nn.Linear(self.full_dim, out_channels, bias=True),
-            nn.SiLU(),
-            nn.LayerNorm(out_channels),
-        )
-
-    def forward(self, op_code: torch.Tensor, features: torch.Tensor, configs: torch.Tensor, dim_features: torch.Tensor):
-        """
-        Forward pass of the layer
-        :param op_code: The op code
-        :param features: The features
-        :param configs: The configs
-        :param dim_features: The dim features
-        :return: The output of the layer
-        """
-
-        # get the first column and convert to int
-        op_code = torch.squeeze(op_code, dim=-1).long()
-
-        # embed the first column
-        embedding = self.emb(op_code)
-
-        # apply the MLPs
-        configs = self.config_mlp(configs)
-        dim_features = self.dim_mlp(dim_features)
-
-        # project the configs
-        configs_emb = self.projections(configs)
-        configs_emb = nn.functional.gelu(configs_emb)
-        list_dim, graph_dim, _ = configs_emb.shape
-        configs_emb = configs_emb.reshape(list_dim, graph_dim, self.n_dim_features, self.n_projections)
-
-        # project the features
-        weights = torch.einsum("lgf,lgfp->lgp", dim_features, configs_emb)
-
-        # concatenate
-        x = torch.concatenate([embedding, features, weights], dim=-1)
-
-        # project
-        x = self.mlp(x)
-
-        return x
-
-
-class EmbeddingInputLayerV2(nn.Module):
-    """
-    This is just a layer that splits of the first column of the input and embeds it
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        emb_size: int = 32,
-        num_embeddings: int = 128,
-        n_configs: int = 18,
-        n_dim_features: int = 74,
         layer_norm: bool = True,
-        **kwargs,
     ):
         """
         Inits the layer
@@ -128,8 +24,6 @@ class EmbeddingInputLayerV2(nn.Module):
         :param out_channels: The number of output channels after the projection
         :param emb_size: The size of the embedding
         :param num_embeddings: The number of embeddings
-        :param n_configs: The number of configurations
-        :param n_dim_features: The number of dimension features
         :param layer_norm: Whether to use layer norm or not
         """
 
@@ -139,11 +33,10 @@ class EmbeddingInputLayerV2(nn.Module):
         # save the attributes
         self.emb_size = emb_size
         self.num_embeddings = num_embeddings
-        self.n_configs = n_configs
-        self.n_dim_features = n_dim_features
-
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         # some dims
-        self.full_dim = in_channels + emb_size + n_configs + n_dim_features
+        self.full_dim = in_channels + emb_size - 1
 
         # init the embedding
         self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
@@ -155,13 +48,11 @@ class EmbeddingInputLayerV2(nn.Module):
             nn.LayerNorm(out_channels) if layer_norm else nn.Identity(),
         )
 
-    def forward(self, op_code: torch.Tensor, features: torch.Tensor, configs: torch.Tensor, dim_features: torch.Tensor):
+    def forward(self, op_code: torch.Tensor, features: torch.Tensor):
         """
         Forward pass of the layer
         :param op_code: The op code
         :param features: The features
-        :param configs: The configs
-        :param dim_features: The dim features
         :return: The output of the layer
         """
 
@@ -172,7 +63,7 @@ class EmbeddingInputLayerV2(nn.Module):
         embedding = self.emb(op_code)
 
         # concatenate
-        x = torch.concatenate([embedding, features, dim_features, configs], dim=-1)
+        x = torch.concatenate([embedding, features], dim=-1)
 
         # project
         x = self.mlp(x)
@@ -185,14 +76,14 @@ class SAGEConv(nn.Module):
     Implements a simple SAGE convolution
     """
 
-    def __init__(self, in_channels: int, out_channels: int, message_dim=32, lpe_conv=False):
+    def __init__(self, in_channels: int, out_channels: int, message_dim=32, pe_conv=False):
         """
         Inits the layer
         :param in_channels: Number of input channels
         :param out_channels: Number of output channels
         :param message_dim: The dimension of the messages
-        :param lpe_conv: Whether this is an LPE convolution or not, if True, no layer norm is applied and the
-                         activation is tanh
+        :param pe_conv: Whether this is an PE convolution or not, if True, no layer norm is applied and the
+                        activation is tanh
         """
 
         # init the super class
@@ -202,7 +93,7 @@ class SAGEConv(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.message_dim = message_dim
-        self.lpe_conv = lpe_conv
+        self.lpe_conv = pe_conv
 
         # init the layers
         self.linear = nn.Linear(in_channels, out_channels, bias=True)
@@ -210,7 +101,7 @@ class SAGEConv(nn.Module):
         self.agg_linear_out = nn.Linear(in_channels, message_dim, bias=True)
 
         # for the output MLP with layer norm
-        if lpe_conv:
+        if pe_conv:
             self.mlp_out = nn.Sequential(
                 nn.Tanh(),
                 nn.Linear(out_channels + 2 * message_dim, out_channels),
@@ -331,70 +222,54 @@ class TPUGraphNetwork(nn.Module):
         embedding_out: int,
         message_network_dims: list[int],
         n_normal_features: int,
-        n_dim_features: int,
-        n_lpe_features: int,
-        n_configs: int = 18,
+        n_pe_features: int,
         embedding_dim: int = 32,
-        lpe_embedding_dim: int = 32,
+        pe_embedding_dim: int = 32,
         message_dim: int = 32,
         linformer_dim: int = 32,
-        embedding_version: str = "v2",
         dropout: float = 0.0,
-        **kwargs,
     ):
         """
-        Init the network
-        :param embedding_out: Output dimension of the embedding layer
-        :param message_network_dims: The dimensions of the message network (output dimensions of each layer)
+        Inits the network
+        :param embedding_out: The number of output channels after the embedding layer
+        :param message_network_dims: The dimensions of the message network
         :param n_normal_features: The number of normal features
-        :param n_dim_features: The number of dimension features
-        :param n_lpe_features: The number of LPE features
-        :param n_configs: The number of configurations
-        :param kwargs: Additional arguments
+        :param n_pe_features: The number of PE features
+        :param embedding_dim: The dimension of the embedding
+        :param pe_embedding_dim: The dimension of the PE embedding (used to learn the PE features)
+        :param message_dim: The dimension of the messages
+        :param linformer_dim: The dimension of the linformer
         """
 
         # init the super class
-        super().__init__(**kwargs)
+        super().__init__()
 
         # save attributes
         self.embedding_out = embedding_out
         self.message_network_dims = message_network_dims
         self.n_normal_features = n_normal_features
-        self.n_dim_features = n_dim_features
-        self.n_lpe_features = n_lpe_features
-        self.n_configs = n_configs
-        self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
+        self.n_lpe_features = n_pe_features
+        self.in_channels = n_normal_features + n_pe_features + 1
         self.embedding_dim = embedding_dim
-        self.lpe_embedding_dim = lpe_embedding_dim
+        self.lpe_embedding_dim = pe_embedding_dim
         self.message_dim = message_dim
         self.linformer_dim = linformer_dim
         self.dropout = dropout
-
-        # the embedding layer
-        if embedding_version == "v1":
-            emb_layer_class = EmbeddingInputLayer
-        elif embedding_version == "v2":
-            emb_layer_class = EmbeddingInputLayerV2
-        else:
-            raise ValueError(f"Unknown embedding version {embedding_version}")
 
         # the dropout layer
         self.dropout_layer = nn.Dropout(dropout)
 
         # embedding layer
-        self.embedding_layer = emb_layer_class(
+        self.embedding_layer = EmbeddingInputLayer(
             in_channels=n_normal_features,
             out_channels=embedding_out,
             num_embeddings=MAX_OP_CODE,
             emb_size=embedding_dim,
-            n_configs=n_configs,
-            n_dim_features=n_dim_features,
-            n_projections=n_configs,
         )
 
         # lpe initial projection
         self.lpe_projection = nn.Sequential(
-            nn.Linear(n_lpe_features, lpe_embedding_dim),
+            nn.Linear(n_pe_features, pe_embedding_dim),
             nn.Tanh(),
         )
 
@@ -405,12 +280,12 @@ class TPUGraphNetwork(nn.Module):
         self.combination_nets = nn.ModuleList()
         message_network_dims = [embedding_out] + message_network_dims
         for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim, message_dim=message_dim))
+            self.feature_sage_convs.append(SAGEConv(pe_embedding_dim + in_dim, out_dim, message_dim=message_dim))
             self.lpe_sage_convs.append(
-                SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=lpe_embedding_dim // 2)
+                SAGEConv(pe_embedding_dim, pe_embedding_dim, pe_conv=True, message_dim=pe_embedding_dim // 2)
             )
             self.linformers.append(
-                LinFormer(lpe_embedding_dim + in_dim, out_dim, key_dim=linformer_dim, query_dim=linformer_dim)
+                LinFormer(pe_embedding_dim + in_dim, out_dim, key_dim=linformer_dim, query_dim=linformer_dim)
             )
             self.combination_nets.append(
                 nn.Sequential(
@@ -421,7 +296,7 @@ class TPUGraphNetwork(nn.Module):
             )
 
         # last mlp to fold in the final lpe features
-        in_dim = message_network_dims[-1] + lpe_embedding_dim
+        in_dim = message_network_dims[-1] + pe_embedding_dim
         out_dim = message_network_dims[-1]
         self.mlp = nn.Sequential(
             nn.Linear(in_dim, in_dim),
@@ -472,17 +347,14 @@ class TPUGraphNetwork(nn.Module):
 
         # split the input features
         op_code, features, dim_features, lpe_features, configs = torch.split(
-            features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
+            features, [1, self.n_normal_features, self.n_lpe_features, self.n_configs], dim=-1
         )
 
-        # we randomly drop some of the features
-        _, graph_dim, _ = features.shape
-        drop_mask = torch.ones((1, graph_dim, 1)).to(features.device)
-        drop_mask = self.dropout_layer(drop_mask)
-        features = features * drop_mask
+        # glue the configs to the features
+        features = torch.cat([features, configs], dim=-1)
 
         # embed the first column
-        emb_features = self.embedding_layer(op_code, features, configs, dim_features)
+        emb_features = self.embedding_layer(op_code, features)
 
         # project the LPE features
         lpe_features = self.lpe_projection(lpe_features)
@@ -510,562 +382,6 @@ class TPUGraphNetwork(nn.Module):
         # final mlp
         emb_features = torch.cat([lpe_features, emb_features], dim=-1)
         emb_features = self.mlp(emb_features)
-
-        # sum over the graphs
-        graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
-
-        # now we do the final projection
-        runtimes = self.projection_network(graph_embedding)
-
-        return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
-
-
-class TPUGraphNetworkV2(nn.Module):
-    """
-    A simple network used for the tile predictions
-    """
-
-    def __init__(
-        self,
-        embedding_out: int,
-        message_network_dims: list[int],
-        n_normal_features: int,
-        n_dim_features: int,
-        n_lpe_features: int,
-        n_configs: int = 18,
-        n_projections: int = 15,
-        embedding_dim: int = 32,
-        lpe_embedding_dim: int = 32,
-        message_dim: int = 32,
-        linformer_dim: int = 32,
-        embedding_version: str = "v2",
-        **kwargs,
-    ):
-        """
-        Init the network
-        :param embedding_out: Output dimension of the embedding layer
-        :param message_network_dims: The dimensions of the message network (output dimensions of each layer)
-        :param n_normal_features: The number of normal features
-        :param n_dim_features: The number of dimension features
-        :param n_lpe_features: The number of LPE features
-        :param n_configs: The number of configurations
-        :param kwargs: Additional arguments
-        """
-
-        # init the super class
-        super().__init__(**kwargs)
-
-        # save attributes
-        self.embedding_out = embedding_out
-        self.message_network_dims = message_network_dims
-        self.n_normal_features = n_normal_features
-        self.n_dim_features = n_dim_features
-        self.n_lpe_features = n_lpe_features
-        self.n_configs = n_configs
-        self.n_projections = n_projections
-        self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
-        self.embedding_dim = embedding_dim
-        self.lpe_embedding_dim = lpe_embedding_dim
-        self.message_dim = message_dim
-        self.linformer_dim = linformer_dim
-
-        # the embedding layer
-        if embedding_version == "v1":
-            emb_layer_class = EmbeddingInputLayer
-        elif embedding_version == "v2":
-            emb_layer_class = EmbeddingInputLayerV2
-        else:
-            raise ValueError(f"Unknown embedding version {embedding_version}")
-
-        self.embedding_layer = emb_layer_class(
-            in_channels=n_normal_features,
-            out_channels=embedding_out,
-            num_embeddings=MAX_OP_CODE,
-            emb_size=embedding_dim,
-            n_configs=n_configs,
-            n_dim_features=n_dim_features,
-            n_projections=n_projections,
-        )
-
-        # lpe initial projection
-        self.lpe_projection = nn.Sequential(
-            nn.Linear(n_lpe_features, lpe_embedding_dim),
-            nn.Tanh(),
-        )
-
-        # the message network
-        self.feature_sage_convs = nn.ModuleList()
-        self.lpe_sage_convs = nn.ModuleList()
-        message_network_dims = [embedding_out] + message_network_dims
-        for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim, message_dim=message_dim))
-            self.lpe_sage_convs.append(
-                SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=lpe_embedding_dim // 2)
-            )
-
-        # for the last layer we add a linformer and a combination net
-        in_dim = message_network_dims[-2]
-        out_dim = message_network_dims[-1]
-        self.linformer = LinFormer(lpe_embedding_dim + in_dim, out_dim, key_dim=linformer_dim, query_dim=linformer_dim)
-        self.combination_net = nn.Sequential(
-            nn.Linear(2 * out_dim, out_dim),
-            nn.SiLU(),
-            nn.LayerNorm(out_dim),
-        )
-
-        # fold in the last lpe
-        in_dim = message_network_dims[-1] + lpe_embedding_dim
-        out_dim = message_network_dims[-1]
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, out_dim),
-            nn.SiLU(),
-            nn.LayerNorm(out_dim),
-        )
-
-        # final projection
-        out_dim = message_network_dims[-1]
-        self.projection_network = nn.Linear(out_dim, 1, bias=False)
-
-    def forward(
-        self,
-        features: torch.Tensor,
-        edge_index: torch.Tensor,
-        lengths: list[int],
-    ):
-        """
-        Forward pass of the network
-        :param features: The input features (multiple graphs concatenated)
-        :param edge_index: The indices of the connection matrix
-        :param lengths: The lengths of the individual graphs
-        :return: The predicted runtime in nanoseconds
-        """
-
-        # create and index for the scatter sum
-        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to(features.device)
-
-        # build the connection matrix
-        with torch.no_grad():
-            # create the connection matrix
-            n_nodes = features.shape[1]
-            values = torch.ones(edge_index.shape[1]).to(edge_index.device)
-            norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-            norm = norm.clamp(min=1.0)[edge_index[0]]
-            values = values / norm
-            connection_matrix_in = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
-
-            # the other connection matrix if necessary
-            edge_index = edge_index.flip(0)
-            values = torch.ones(edge_index.shape[1]).to(edge_index.device)
-            norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-            norm = norm.clamp(min=1.0)[edge_index[1]]
-            values = values / norm
-            connection_matrix_out = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
-
-        # split the input features
-        op_code, features, dim_features, lpe_features, configs = torch.split(
-            features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
-        )
-
-        # embed the first column
-        sage_features = self.embedding_layer(op_code, features, configs, dim_features)
-
-        # project the LPE features
-        lpe_features = self.lpe_projection(lpe_features)
-
-        # cycle through all layers
-        for feature_sage_conv, lpe_sage_conv in zip(self.feature_sage_convs, self.lpe_sage_convs):
-            # add the current LPE features to the features
-            emb_features = torch.cat([lpe_features, sage_features], dim=-1)
-
-            # apply the feature sage conv
-            sage_features = feature_sage_conv(emb_features, connection_matrix_in, connection_matrix_out)
-
-            # apply the LPE sage conv
-            lpe_features = lpe_sage_conv(lpe_features, connection_matrix_in, connection_matrix_out)
-
-        # apply the linformer
-        linformer_features = self.linformer(emb_features, lengths)
-
-        # concatenate and combine
-        emb_features = torch.cat([sage_features, linformer_features], dim=-1)
-        emb_features = self.combination_net(emb_features)
-
-        # fold in the last LPE features
-        emb_features = torch.cat([lpe_features, emb_features], dim=-1)
-        emb_features = self.mlp(emb_features)
-
-        # now we can apply the weights
-        graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
-
-        # now we do the final projection
-        runtimes = self.projection_network(graph_embedding)
-
-        return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
-
-
-class TPUGraphNetworkSimple(nn.Module):
-    """
-    A simple network used for the tile predictions
-    """
-
-    def __init__(
-        self,
-        embedding_out: int,
-        message_network_dims: list[int],
-        n_normal_features: int,
-        n_dim_features: int,
-        n_lpe_features: int,
-        n_configs: int = 18,
-        embedding_dim: int = 128,
-        embedding_version: str = "v2",
-        num_embeddings: int | None = None,
-        layer_norm: bool = True,
-        dropout: float = 0.0,
-        **kwargs,
-    ):
-        """
-        Init the network
-        :param embedding_out: Output dimension of the embedding layer
-        :param message_network_dims: The dimensions of the message network (output dimensions of each layer)
-        :param n_normal_features: The number of normal features
-        :param n_dim_features: The number of dimension features
-        :param n_lpe_features: The number of LPE features
-        :param n_configs: The number of configurations
-        :param embedding_dim: The dimension of the embedding
-        :param embedding_version: The version of the embedding layer
-        :param num_embeddings: The number of embeddings
-        :param layer_norm: Whether to use layer norm or not
-        :param dropout: The dropout rate
-        :param kwargs: Additional arguments
-        """
-
-        # init the super class
-        super().__init__(**kwargs)
-
-        # save attributes
-        self.embedding_out = embedding_out
-        self.message_network_dims = message_network_dims
-        self.n_normal_features = n_normal_features
-        self.n_dim_features = n_dim_features
-        self.n_lpe_features = n_lpe_features
-        self.n_configs = n_configs
-        self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
-        self.embedding_dim = embedding_dim
-        self.dropout_rate = dropout
-
-        # the embedding layer
-        if embedding_version == "v1":
-            emb_layer_class = EmbeddingInputLayer
-        elif embedding_version == "v2":
-            emb_layer_class = EmbeddingInputLayerV2
-        else:
-            raise ValueError(f"Unknown embedding version {embedding_version}")
-
-        self.embedding_layer = emb_layer_class(
-            in_channels=n_normal_features,
-            out_channels=embedding_out,
-            num_embeddings=MAX_OP_CODE if num_embeddings is None else num_embeddings,
-            emb_size=embedding_dim,
-            n_configs=n_configs,
-            n_dim_features=n_dim_features,
-            n_projections=n_configs,
-            layer_norm=layer_norm,
-        )
-
-        # the dropout layer
-        self.dropout = nn.Dropout(dropout)
-
-        # the message network is a simple MLP
-        message_network_dims = [embedding_out] + message_network_dims
-        self.message_network = nn.ModuleList()
-        for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.message_network.append(
-                nn.Sequential(
-                    nn.Linear(in_dim, out_dim),
-                    nn.SiLU(),
-                    nn.LayerNorm(out_dim) if layer_norm else nn.Identity(),
-                )
-            )
-
-        # final projection
-        out_dim = message_network_dims[-1]
-        self.projection_network = nn.Linear(out_dim, 1, bias=False)
-
-    def forward(
-        self,
-        features: torch.Tensor,
-        edge_index: torch.Tensor,
-        lengths: list[int],
-    ):
-        """
-        Forward pass of the network
-        :param features: The input features (multiple graphs concatenated)
-        :param edge_index: The indices of the connection matrix
-        :param lengths: The lengths of the individual graphs
-        :return: The predicted runtime in nanoseconds
-        """
-
-        # create and index for the scatter sum
-        index = torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(lengths)])).long().to(features.device)
-
-        # split the input features
-        op_code, features, dim_features, lpe_features, configs = torch.split(
-            features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
-        )
-
-        # embed the first column
-        emb_features = self.embedding_layer(op_code, features, configs, dim_features)
-
-        # cycle through all layers
-        for layer in self.message_network:
-            # apply the layer
-            emb_features = layer(emb_features)
-
-        # now we can apply the weights
-        graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
-
-        # now we do the final projection
-        runtimes = self.projection_network(graph_embedding)
-
-        return graph_embedding, torch.squeeze(runtimes.transpose(0, 1), dim=-1)
-
-
-class TPUGraphNetworkV3(nn.Module):
-    """
-    A simple network used for the tile predictions
-    """
-
-    def __init__(
-        self,
-        embedding_out: int,
-        start_mlp_dims: list[int],
-        message_network_dims: list[int],
-        final_mlp_dims: list[int],
-        n_normal_features: int,
-        n_dim_features: int,
-        n_lpe_features: int,
-        n_configs: int = 18,
-        embedding_dim: int = 32,
-        lpe_embedding_dim: int = 32,
-        message_dim: int = 32,
-        linformer_dim: int = 32,
-        embedding_version: str = "v2",
-        dropout: float = 0.0,
-        **kwargs,
-    ):
-        """
-        Init the network
-        :param embedding_out: Output dimension of the embedding layer
-        :param message_network_dims: The dimensions of the message network (output dimensions of each layer)
-        :param n_normal_features: The number of normal features
-        :param n_dim_features: The number of dimension features
-        :param n_lpe_features: The number of LPE features
-        :param n_configs: The number of configurations
-        :param kwargs: Additional arguments
-        """
-
-        # init the super class
-        super().__init__(**kwargs)
-
-        # save attributes
-        self.embedding_out = embedding_out
-        self.start_mlp_dims = start_mlp_dims
-        self.message_network_dims = message_network_dims
-        self.final_mlp_dims = final_mlp_dims
-        self.n_normal_features = n_normal_features
-        self.n_dim_features = n_dim_features
-        self.n_lpe_features = n_lpe_features
-        self.n_configs = n_configs
-        self.in_channels = n_normal_features + n_dim_features + n_lpe_features + n_configs + 1
-        self.embedding_dim = embedding_dim
-        self.lpe_embedding_dim = lpe_embedding_dim
-        self.message_dim = message_dim
-        self.linformer_dim = linformer_dim
-        self.dropout = dropout
-
-        # the embedding layer
-        if embedding_version == "v1":
-            emb_layer_class = EmbeddingInputLayer
-        elif embedding_version == "v2":
-            emb_layer_class = EmbeddingInputLayerV2
-        else:
-            raise ValueError(f"Unknown embedding version {embedding_version}")
-
-        # the dropout layer
-        self.dropout_layer = nn.Dropout(dropout)
-
-        # embedding layer
-        self.embedding_layer = emb_layer_class(
-            in_channels=n_normal_features,
-            out_channels=embedding_out,
-            num_embeddings=MAX_OP_CODE,
-            emb_size=embedding_dim,
-            n_configs=n_configs,
-            n_dim_features=n_dim_features,
-            n_projections=n_configs,
-            layer_norm=True,
-        )
-
-        # lpe initial projection
-        self.lpe_projection = nn.Sequential(
-            nn.Linear(n_lpe_features, lpe_embedding_dim),
-            nn.Tanh(),
-        )
-
-        # initial mlp
-        start_mlp_dims = [embedding_out] + start_mlp_dims
-        self.start_mlp = nn.ModuleList()
-        for i, (in_dim, out_dim) in enumerate(zip(start_mlp_dims[:-1], start_mlp_dims[1:])):
-            self.start_mlp.append(
-                nn.Sequential(
-                    nn.Linear(in_dim, out_dim),
-                    nn.SiLU(),
-                    nn.LayerNorm(out_dim),
-                )
-            )
-
-        # the message network
-        self.feature_sage_convs = nn.ModuleList()
-        self.lpe_sage_convs = nn.ModuleList()
-        self.linformers = nn.ModuleList()
-        self.combination_nets = nn.ModuleList()
-        message_network_dims = [start_mlp_dims[-1]] + message_network_dims
-        for i, (in_dim, out_dim) in enumerate(zip(message_network_dims[:-1], message_network_dims[1:])):
-            self.feature_sage_convs.append(SAGEConv(lpe_embedding_dim + in_dim, out_dim, message_dim=message_dim))
-            self.lpe_sage_convs.append(
-                SAGEConv(lpe_embedding_dim, lpe_embedding_dim, lpe_conv=True, message_dim=lpe_embedding_dim // 2)
-            )
-            self.linformers.append(
-                LinFormer(lpe_embedding_dim + in_dim, out_dim, key_dim=linformer_dim, query_dim=linformer_dim)
-            )
-            self.combination_nets.append(
-                nn.Sequential(
-                    nn.Linear(2 * out_dim, out_dim),
-                    nn.SiLU(),
-                    nn.LayerNorm(out_dim),
-                )
-            )
-
-        # last mlp to fold in the final lpe features
-        final_mlp_dims = [message_network_dims[-1] + lpe_embedding_dim + n_configs] + final_mlp_dims
-        self.final_mlp = nn.ModuleList()
-        for i, (in_dim, out_dim) in enumerate(zip(final_mlp_dims[:-1], final_mlp_dims[1:])):
-            self.final_mlp.append(
-                nn.Sequential(
-                    nn.Linear(in_dim, out_dim),
-                    nn.SiLU(),
-                )
-            )
-
-        # final projection
-        out_dim = final_mlp_dims[-1]
-        self.projection_network = nn.Linear(out_dim, 1, bias=False)
-
-    def forward(
-        self,
-        features: torch.Tensor,
-        indices: torch.Tensor,
-        lengths: tuple[list[int], list[int]],
-    ):
-        """
-        Forward pass of the network
-        :param features: The input features (multiple graphs concatenated)
-        :param indices: the full edege index and the select index
-        :param lengths: The lengths of the individual graphs
-        :return: The predicted runtime in nanoseconds
-        """
-
-        # create and index for the scatter sum
-        edge_lengths, index_lengths = lengths
-        index = (
-            torch.Tensor(np.concatenate([np.ones(l) * i for i, l in enumerate(index_lengths)]))
-            .long()
-            .to(features.device)
-        )
-
-        # build the connection matrix
-        with torch.no_grad():
-            # unpack
-            n_elements = indices.shape[1]
-            edge_index, select_index = torch.split(
-                indices, [n_elements - sum(index_lengths), sum(index_lengths)], dim=1
-            )
-            selection_matrix = torch.sparse_coo_tensor(
-                select_index,
-                torch.ones(select_index.shape[1]).to(select_index.device),
-                (select_index.shape[1], features.shape[1]),
-            )
-
-            # create the connection matrix
-            n_nodes = features.shape[1]
-            values = torch.ones(edge_index.shape[1]).to(edge_index.device)
-            norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-            norm = norm.clamp(min=1.0)[edge_index[0]]
-            values = values / norm
-            connection_matrix_in = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
-
-            # the other connection matrix if necessary
-            edge_index = edge_index.flip(0)
-            values = torch.ones(edge_index.shape[1]).to(edge_index.device)
-            norm = torch_scatter.scatter_sum(values, index=edge_index[0], dim=0, dim_size=n_nodes)
-            norm = norm.clamp(min=1.0)[edge_index[1]]
-            values = values / norm
-            connection_matrix_out = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
-
-        # split the input features
-        op_code, features, dim_features, lpe_features, configs = torch.split(
-            features, [1, self.n_normal_features, self.n_dim_features, self.n_lpe_features, self.n_configs], dim=-1
-        )
-
-        # we randomly drop some of the features
-        _, graph_dim, _ = features.shape
-        drop_mask = torch.ones((1, graph_dim, 1)).to(features.device)
-        drop_mask = self.dropout_layer(drop_mask)
-        features = features * drop_mask
-
-        # embed the first column
-        emb_features = self.embedding_layer(op_code, features, configs, dim_features)
-
-        # apply the initial mlp
-        for layer in self.start_mlp:
-            emb_features = layer(emb_features)
-
-        # project the LPE features
-        lpe_features = self.lpe_projection(lpe_features)
-
-        # cycle through all layers
-        for feature_sage_conv, lpe_sage_conv, linformer, combi_net in zip(
-            self.feature_sage_convs, self.lpe_sage_convs, self.linformers, self.combination_nets
-        ):
-            # add the current LPE features to the features
-            emb_features = torch.cat([lpe_features, emb_features], dim=-1)
-
-            # apply the feature sage conv
-            sage_features = feature_sage_conv(emb_features, connection_matrix_in, connection_matrix_out)
-
-            # apply the LPE sage conv
-            lpe_features = lpe_sage_conv(lpe_features, connection_matrix_in, connection_matrix_out)
-
-            # apply the linformer
-            linformer_features = linformer(emb_features, edge_lengths)
-
-            # concatenate and combine
-            emb_features = torch.cat([sage_features, linformer_features], dim=-1)
-            emb_features = combi_net(emb_features)
-
-        # add the current LPE features to the features
-        emb_features = torch.cat([lpe_features, emb_features, configs], dim=-1)
-
-        # apply the selection matrix
-        list_dim, graph_dim, feature_dim = emb_features.shape
-        emb_features = emb_features.transpose(0, 1).reshape(graph_dim, list_dim * feature_dim)
-        emb_features = torch.sparse.mm(selection_matrix, emb_features)
-        # graph is now reduced
-        emb_features = emb_features.reshape(-1, list_dim, feature_dim).transpose(0, 1)
-
-        # final mlp
-        for layer in self.final_mlp:
-            emb_features = layer(emb_features)
 
         # sum over the graphs
         graph_embedding = torch_scatter.scatter_sum(emb_features, index=index, dim=1)
