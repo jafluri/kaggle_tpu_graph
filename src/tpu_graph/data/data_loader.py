@@ -596,14 +596,14 @@ class LayoutDataset(Dataset):
         # read out the data for this graph (we copy because a subset will be logged)
         node_feat = data["node_feat"]
         node_opcode = data["node_opcode"]
-        pe = data["pe_asym"]
-        new_pe = data["pe_sym"]
+        pe_asym = data["pe_asym"]
+        pe_sym = data["pe_sym"]
         edge_index = data["edge_index"]
 
-        # add node_feat and pe
+        # add node_feat and pe_asym
         if self.log:
             node_feat = np.log(node_feat + 5.0) - np.log(5.0)
-        node_feat = np.concatenate([node_feat, pe, new_pe], axis=1)
+        node_feat = np.concatenate([node_feat, pe_asym, pe_sym], axis=1)
 
         # we divide by 5 to normalize the config features
         config_feat = data["node_config_feat"][indices] / 5.0
