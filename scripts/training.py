@@ -11,7 +11,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel as DDP
-from tpu_graph.data import LayoutDatasetV4 as LayoutDataset
+from tpu_graph.data import LayoutDataset
 from tpu_graph.networks import TPUGraphNetwork
 from tpu_graph.training import evaluation
 from tpu_graph.training.ltr.pairwise_losses import PairwiseHingeLoss
@@ -26,12 +26,14 @@ def setup(rank, world_size):
     :param rank: The rank of the current process
     :param world_size: The total number of processes
     """
+
+    # TODO: make this parameters
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -62,15 +64,13 @@ def train_network(rank, kwargs):
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
-                "dataset": "Tiles Dataset of the TPU Graph Benchmark",
+                "dataset": "Layout Dataset of the TPU Graph Benchmark",
                 "epochs": kwargs["epochs"],
                 "batch_size": kwargs["batch_size"],
                 "cosine_annealing": kwargs["cosine_annealing"],
                 "network_type": "Layout Network",
                 "list_size": kwargs["list_size"],
-                "dropout": kwargs["dropout"],
                 "reload_configs": kwargs["reload_configs"],
-                "steps_per_batch": kwargs["steps_per_batch"],
                 "n_configs_per_file": kwargs["n_configs_per_file"],
                 "n_configs_val": kwargs["n_configs_val"],
             },
@@ -96,8 +96,6 @@ def train_network(rank, kwargs):
     logger.info("Loading the dataset for training")
     train_dataset = LayoutDataset(
         [base_path.joinpath("train") for base_path in base_paths],
-        cache=kwargs["cache"],
-        clear_cache=kwargs["clear_cache"],
         list_size=kwargs["list_size"],
         list_shuffle=True,
         num_shards=kwargs["world_size"],
@@ -110,9 +108,7 @@ def train_network(rank, kwargs):
     logger.info("Loading the dataset for validation")
     val_dataset = LayoutDataset(
         [base_path.joinpath("valid") for base_path in base_paths],
-        cache=kwargs["cache"],
         list_size=1,
-        clear_cache=kwargs["clear_cache"],
         num_shards=kwargs["world_size"],
         shard_id=rank,
         n_configs_per_file=kwargs["n_configs_val"],
@@ -123,9 +119,7 @@ def train_network(rank, kwargs):
     logger.info("Loading the dataset for testing")
     test_dataset = LayoutDataset(
         [base_path.joinpath("test") for base_path in base_paths],
-        cache=kwargs["cache"],
         list_size=1,
-        clear_cache=kwargs["clear_cache"],
         num_shards=kwargs["world_size"],
         shard_id=rank,
         prune=True,
@@ -139,8 +133,7 @@ def train_network(rank, kwargs):
         embedding_out=512,
         message_network_dims=[256 + 128, 256, 256, 256],
         n_normal_features=140 + 30 + 16,
-        n_dim_features=2 * 37,
-        n_lpe_features=128,
+        n_pe_features=128,
         n_configs=18,
         embedding_dim=128,
         lpe_embedding_dim=64,
@@ -329,8 +322,6 @@ def train_network(rank, kwargs):
 )
 @click.option("--epochs", type=int, default=1, help="The number of epochs to train")
 @click.option("--batch_size", type=int, default=16, help="The batch size to use for training")
-@click.option("--cache", is_flag=True, help="If set, the dataset is cached in memory")
-@click.option("--clear_cache", is_flag=True, help="If set, the cache is cleared before training")
 @click.option(
     "--list_size",
     type=int,
@@ -342,9 +333,18 @@ def train_network(rank, kwargs):
 @click.option("--n_configs_val", type=int, default=None, help="The number of configs to use for validation")
 @click.option("--world_size", type=int, default=1, help="The number of GPUs to use for training")
 @click.option("--max_train_steps", type=int, default=None, help="The maximum number of training steps per epoch")
-@click.option("--dropout", type=float, default=0.25, help="The dropout to use for the network")
 @click.option("--reload_configs", type=int, default=1, help="The number of epochs after which to reload the configs")
-@click.option("--steps_per_batch", type=int, default=1, help="The number of steps per batch")
+@click.option(
+    "--pruning",
+    choices=[None, "v1", "v2", "v3"],
+    default=None,
+    help="The pruning strategy to use. "
+    "None: No pruning"
+    "v1: Prune all nodes besides the configurable ones. The edges fully remvoed"
+    "v2: Prune all nodes besides the configurable ones and their inputs/outputs"
+    "v3: Prune all nodes besides the configurable ones, their inputs/outputs and merge the rest "
+    "ïnto virtual nodes",
+)
 def main(**kwargs):
     # setup the distributed training
     mp.spawn(train_network, args=(kwargs,), nprocs=kwargs["world_size"], join=True)
