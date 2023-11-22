@@ -61,7 +61,6 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
-            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -199,17 +198,16 @@ def train_network(rank, kwargs):
             edge_index = edge_index.to(rank)
 
             # predict the runtimes
-            for _ in range(kwargs["steps_per_batch"]):
-                _, pred_runtimes = network(features, edge_index, lengths)
-                loss = torch.mean(loss_fn(pred_runtimes, runtimes))
+            _, pred_runtimes = network(features, edge_index, lengths)
+            loss = torch.mean(loss_fn(pred_runtimes, runtimes))
 
-                # backprop
-                optimizer.zero_grad()
-                loss.backward()
+            # backprop
+            optimizer.zero_grad()
+            loss.backward()
 
-                # clip the gradients and step
-                torch.nn.utils.clip_grad_norm_(network.parameters(), 1.0)
-                optimizer.step()
+            # clip the gradients and step
+            torch.nn.utils.clip_grad_norm_(network.parameters(), 1.0)
+            optimizer.step()
 
             # step the scheduler
             if scheduler is not None:
@@ -280,7 +278,7 @@ def train_network(rank, kwargs):
                 logger.info("Shuffling the dataset")
                 train_dataset.reshuffle_indices()
             train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
-        elif kwargs["n_configs_per_file"] is not None and epoch < kwargs["epochs"] - 1:
+        elif kwargs["n_configs_per_file"] is None and epoch < kwargs["epochs"] - 1:
             logger.info("Shuffling the dataset")
             train_dataset.reshuffle_indices()
             train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])

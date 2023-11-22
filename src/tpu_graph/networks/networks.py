@@ -36,7 +36,7 @@ class EmbeddingInputLayer(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         # some dims
-        self.full_dim = in_channels + emb_size - 1
+        self.full_dim = in_channels + emb_size
 
         # init the embedding
         self.emb = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=emb_size)
@@ -263,7 +263,7 @@ class TPUGraphNetwork(nn.Module):
 
         # embedding layer
         self.embedding_layer = EmbeddingInputLayer(
-            in_channels=n_normal_features,
+            in_channels=n_normal_features + n_configs,
             out_channels=embedding_out,
             num_embeddings=MAX_OP_CODE,
             emb_size=embedding_dim,
@@ -348,7 +348,7 @@ class TPUGraphNetwork(nn.Module):
             connection_matrix_out = torch.sparse_coo_tensor(edge_index, values, (n_nodes, n_nodes))
 
         # split the input features
-        op_code, features, dim_features, lpe_features, configs = torch.split(
+        op_code, features, lpe_features, configs = torch.split(
             features, [1, self.n_normal_features, self.n_lpe_features, self.n_configs], dim=-1
         )
 
