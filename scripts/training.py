@@ -61,6 +61,7 @@ def train_network(rank, kwargs):
         # Start with the wandb init
         logger.info("Starting wandb")
         wandb.init(
+            mode="disabled",
             project="TPU Graph",
             config={
                 "learning_rate": kwargs["learning_rate"],
@@ -73,6 +74,7 @@ def train_network(rank, kwargs):
                 "reload_configs": kwargs["reload_configs"],
                 "n_configs_per_file": kwargs["n_configs_per_file"],
                 "n_configs_val": kwargs["n_configs_val"],
+                "prune": kwargs["pruning"]
             },
         )
 
@@ -101,7 +103,7 @@ def train_network(rank, kwargs):
         num_shards=kwargs["world_size"],
         shard_id=rank,
         n_configs_per_file=kwargs["n_configs_per_file"],
-        prune=True,
+        prune=kwargs["pruning"],
     )
     train_dataloader = train_dataset.get_dataloader(batch_size=kwargs["batch_size"])
 
@@ -112,7 +114,7 @@ def train_network(rank, kwargs):
         num_shards=kwargs["world_size"],
         shard_id=rank,
         n_configs_per_file=kwargs["n_configs_val"],
-        prune=True,
+        prune=kwargs["pruning"],
     )
     val_dataloader = val_dataset.get_dataloader(batch_size=32, shuffle=False, drop_last=False)
 
@@ -122,7 +124,7 @@ def train_network(rank, kwargs):
         list_size=1,
         num_shards=kwargs["world_size"],
         shard_id=rank,
-        prune=True,
+        prune=kwargs["pruning"],
     )
     test_dataloader = test_dataset.get_dataloader(batch_size=16, shuffle=False, drop_last=False)
 
@@ -139,8 +141,6 @@ def train_network(rank, kwargs):
         lpe_embedding_dim=64,
         message_dim=128,
         linformer_dim=128,
-        embedding_version="v2",
-        dropout=kwargs["dropout"],
     )
 
     # network to GPU
@@ -301,6 +301,7 @@ def train_network(rank, kwargs):
     help="The path to the data, for multiple datasets, one can specify this argument multiple times."
     "Each directory should contain a train, valid and test directory.",
     multiple=True,
+    required=True
 )
 @click.option(
     "--save_path",
@@ -336,12 +337,12 @@ def train_network(rank, kwargs):
 @click.option("--reload_configs", type=int, default=1, help="The number of epochs after which to reload the configs")
 @click.option(
     "--pruning",
-    choices=[None, "v1", "v2", "v3"],
+    type=click.Choice(["v1", "v2", "v3"]),
     default=None,
     help="The pruning strategy to use. "
-    "None: No pruning"
-    "v1: Prune all nodes besides the configurable ones. The edges fully remvoed"
-    "v2: Prune all nodes besides the configurable ones and their inputs/outputs"
+    "None: No pruning (default) "
+    "v1: Prune all nodes besides the configurable ones. The edges fully remvoed "
+    "v2: Prune all nodes besides the configurable ones and their inputs/outputs "
     "v3: Prune all nodes besides the configurable ones, their inputs/outputs and merge the rest "
     "ïnto virtual nodes",
 )

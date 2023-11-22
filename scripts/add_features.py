@@ -75,7 +75,7 @@ def add_features(
         # save the file with cached.npz
         logger.info("Saving file")
         cache_name = npz_file.parent.joinpath(npz_file.stem + "_cached.npz")
-        np.savez_compressed(cache_name, **npz_data)
+        np.savez(cache_name, **npz_data)
 
 
 if __name__ == "__main__":

@@ -546,7 +546,7 @@ class LayoutDataset(Dataset):
             _data_dict = self._prune_data_v2(_data_dict)
         elif self.prune == "v3":
             _data_dict = self._prune_data_v3(_data_dict)
-        else:
+        elif self.prune is not None:
             raise ValueError(f"Unknown prune option {self.prune}")
 
         return _data_dict
