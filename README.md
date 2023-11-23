@@ -13,6 +13,9 @@ of the development. For completeness, all submissions have separate branches in 
 However, the state of the repo during the development was quite messy. The codes of the submissions 
 follow all the same pattern, but use slightly different network architectures, conventions etc. 
 Experiments show that the main branch achieves the same or better results and is therefore recommended.
+Note that the Kendall's Tau score is a very noisy evaluation metric. Training the same network in the same way 
+can lead to a difference of 0.1 in the score. One has to be careful when comparing different networks and always 
+train them multiple times.
 
 ### Installation
 
@@ -30,8 +33,8 @@ This repo depends on `pytorch` which should be installed with GPU support.
 ## Usage
 
 The packages uses the data of the competition and has two script in the `scripts` folder. 
-The first one `add_features.py` extracts additional features from the data and calculates the 
-positional encodings [RWPE](https://arxiv.org/pdf/2110.07875.pdf). It requires pointers to directories 
+The first one `add_features.py` extracts additional features from the data, logs features with larege dynamic ranges 
+add some derived features and calculates the positional encodings [RWPE](https://arxiv.org/pdf/2110.07875.pdf). It requires pointers to directories 
 containing the protocol buffer files and the npz files. You can have a look at the full signature 
 with `python scripts/add_features.py --help`. Note that the RWPE can take a while and use a lot of 
 memory for the larger graph.

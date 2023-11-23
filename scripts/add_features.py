@@ -11,11 +11,29 @@ from tpu_graph.constants import LOG_FEATURES, DIM_FEATURES
 
 
 @click.command()
-@click.option("--proto_dir", type=click.Path(exists=True, dir_okay=True, file_okay=False))
-@click.option("--npz_dir", type=click.Path(exists=True, dir_okay=True, file_okay=False))
-@click.option("--padding", type=int, default=-1)
-@click.option("--pe_dim_asym", type=int, default=16)
-@click.option("--pe_dim_sym", type=int, default=112)
+@click.option(
+    "--proto_dir",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False),
+    help="Directory containing the protobuf files, will be searched recursively",
+)
+@click.option(
+    "--npz_dir",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False),
+    help="Directory containing the npz files, will be searched recursively",
+)
+@click.option("--padding", type=int, default=-1, help="The padding value to use for the new features")
+@click.option(
+    "--pe_dim_asym",
+    type=int,
+    default=16,
+    help="The number of positional encoding vectors to use for the asymmetric positional encoding",
+)
+@click.option(
+    "--pe_dim_sym",
+    type=int,
+    default=112,
+    help="The number of positional encoding vectors to use for the symmetric positional encoding",
+)
 def add_features(
     proto_dir: list[str | bytes | os.PathLike],
     npz_dir: list[str | bytes | os.PathLike],
