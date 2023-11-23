@@ -7,6 +7,7 @@ from tpu_graph import logger
 from tpu_graph.proto import tuning_pb2
 from tpu_graph.utils.feature_extraction import get_additional_features
 from tpu_graph.utils.random_walk_pe import compute_pe
+from tpu_graph.constants import LOG_FEATURES, DIM_FEATURES
 
 
 @click.command()
@@ -55,8 +56,23 @@ def add_features(
         logger.info("Extracting new features from protobuf")
         input_features, new_features = get_additional_features(m, npz_data, padding=padding)
 
+        # log some of the features with large ranges
+        node_feat = npz_data["node_feat"]
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES])
+        input_features = np.log(input_features + 2)
+        new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]])
+
+        # create the dim features
+        dim_features = np.concatenate(
+            [
+                np.mod(node_feat[:, DIM_FEATURES] + 127, 128) / 128.0,
+                np.floor(node_feat[:, DIM_FEATURES] / 128) / 10.0,
+            ],
+            axis=1,
+        )
+
         # add the new features
-        npz_data["node_feat"] = np.concatenate([npz_data["node_feat"], input_features, new_features], axis=1)
+        npz_data["node_feat"] = np.concatenate([node_feat, new_features, input_features, dim_features], axis=1)
 
         # get the pe
         logger.info("Computing positional encodings")

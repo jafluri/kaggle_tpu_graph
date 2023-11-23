@@ -77,7 +77,6 @@ class LayoutDataset(Dataset):
         shard_id: int = 0,
         n_configs_per_file: int | None = None,
         prune: None | Literal["v1", "v2", "v3"] = None,
-        log_features: bool = True,
     ):
         """
         Inits the dataset with a directory containing the NPZ files
@@ -93,7 +92,6 @@ class LayoutDataset(Dataset):
                         v2: Prune all nodes besides the configurable ones and their inputs/outputs
                         v3: Prune all nodes besides the configurable ones, their inputs/outputs and merge the rest ïnto
                             virtual nodes
-        :param log_features: If True, the features are logged
         """
 
         # save the attributes
@@ -103,7 +101,6 @@ class LayoutDataset(Dataset):
         self.shard_id = shard_id
         self.n_configs_per_file = n_configs_per_file
         self.prune = prune
-        self.log = log_features
 
         # get all the files
         if not isinstance(data_path, list):
@@ -601,8 +598,6 @@ class LayoutDataset(Dataset):
         edge_index = data["edge_index"]
 
         # add node_feat and pe_asym
-        if self.log:
-            node_feat = np.log(node_feat + 5.0) - np.log(5.0)
         node_feat = np.concatenate([node_feat, pe_asym, pe_sym], axis=1)
 
         # we divide by 5 to normalize the config features
