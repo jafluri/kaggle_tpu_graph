@@ -58,9 +58,9 @@ def add_features(
 
         # log some of the features with large ranges
         node_feat = npz_data["node_feat"]
-        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES])
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
         input_features = np.log(input_features + 2)
-        new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]])
+        new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]] + 2)
 
         # create the dim features
         dim_features = np.concatenate(
