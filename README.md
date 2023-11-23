@@ -19,7 +19,7 @@ train them multiple times.
 
 ### Installation
 
-You might want to install [`pytorch`](https://pytorch.org/) and [`torch_scatter`](https://github.com/rusty1s/pytorch_scatter) 
+This package was developed and tested with Python 3.11. You might want to install [`pytorch`](https://pytorch.org/) and [`torch_scatter`](https://github.com/rusty1s/pytorch_scatter) 
 manually with matching wheels. Otherwise, the installation is in theory as easy as
 
 ```bash
