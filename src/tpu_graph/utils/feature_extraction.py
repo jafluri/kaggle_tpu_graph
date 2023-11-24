@@ -66,6 +66,9 @@ def get_additional_features(proto_module: HloModuleProto, data_dict: dict[str, n
             if op_codes[i_id] == 26 or op_codes[i_id] == 34:
                 for n_in, in_index in enumerate(inputs):
                     input_features[i_id, 8 * (n_in) : 8 * (n_in + 1)] = features[in_index, 21:29]
+            # otherwise we indicate with -2
+            else:
+                input_features[i_id, :] = -2
 
             # root of a computation
             new_features["is_root_of_com"][i_id] = com.root_id == i.id

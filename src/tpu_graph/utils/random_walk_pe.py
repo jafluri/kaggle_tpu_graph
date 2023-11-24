@@ -71,7 +71,36 @@ class AddRandomWalkPE(BaseTransform):
         return data
 
 
-def compute_pe(
+def compute_pe_tg(edge_index: np.ndarray, n_nodes: int, num_lpe_vecs: int = 112, symmetric: bool = False):
+    """
+    Uses torch_geometric to compute the positional encoding for the given graph
+    :param edge_index: The edge index of the graph
+    :param n_nodes: The number of nodes of the graph
+    :param device: The device to use for the matrix multiplications, defaults to CPU
+    :param num_lpe_vecs: The number of local positional encoding vectors to use
+    :param symmetric: Whether to use symmetric adjacency matrix or not (directed undirected)
+    :return: The positional encoding
+    """
+
+    with torch.no_grad():
+        # create the data
+        if symmetric:
+            edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
+        edge_index = torch.tensor(edge_index, dtype=torch.long)
+        edge_index = add_self_loops(edge_index, num_nodes=n_nodes)[0]
+        x = torch.ones((n_nodes, 1))
+        data = Data(x=x, edge_index=edge_index)
+
+        # the encode
+        encoder = AddRandomWalkPE(walk_length=num_lpe_vecs)
+
+        # get the positional encoding
+        data = encoder(data)
+
+    return data.random_walk_pe.cpu().numpy()
+
+
+def compute_pe_rwpe(
     edge_index: np.ndarray, n_nodes: int, device: str | int = "cpu", num_lpe_vecs: int = 112, symmetric: bool = True
 ):
     """
@@ -116,7 +145,7 @@ def compute_pe(
         # check if the device was a GPU
         if torch.device(device).type == "cuda":
             logger.warning("Could not compute PE on GPU, trying CPU")
-            return compute_pe(edge_index, n_nodes, device="cpu", num_lpe_vecs=num_lpe_vecs, symmetric=symmetric)
+            return compute_pe_rwpe(edge_index, n_nodes, device="cpu", num_lpe_vecs=num_lpe_vecs, symmetric=symmetric)
         else:
             raise e
 

@@ -6,8 +6,8 @@ import numpy as np
 from tpu_graph import logger
 from tpu_graph.proto import tuning_pb2
 from tpu_graph.utils.feature_extraction import get_additional_features
-from tpu_graph.utils.random_walk_pe import compute_pe
-from tpu_graph.constants import LOG_FEATURES, DIM_FEATURES
+from tpu_graph.utils.random_walk_pe import compute_pe_rwpe, compute_pe_tg
+from tpu_graph.constants import LOG_FEATURES, DIM_FEATURES, MAX_OP_CODE
 
 
 @click.command()
@@ -67,18 +67,31 @@ def add_features(
         n_nodes = len(npz_data["node_opcode"])
         logger.info(f"Loaded {n_nodes} nodes")
 
+        # we add an additional node to the graph that is the output node
+        outputs = np.where(npz_data["node_feat"][:, 0] == 1)[0]
+        new_edges = np.zeros((len(outputs), 2), dtype=np.int32)
+        new_edges[:, 1] = outputs
+        new_edges[:, 0] = len(npz_data["node_feat"])
+        new_edges = np.concatenate([npz_data["edge_index"], new_edges], axis=0)
+
         # we flip the edges because of the different definition of the edge index (we copy to avoid negative strides)
-        npz_data["edge_index"] = np.fliplr(npz_data["edge_index"]).T.copy()
+        npz_data["edge_index"] = np.fliplr(new_edges).T.copy()
+
+        # we add an artificial node feature node and opcode
+        npz_data["node_feat"] = np.concatenate(
+            [npz_data["node_feat"], np.zeros((1, npz_data["node_feat"].shape[1]))], axis=0
+        )
+        npz_data["node_opcode"] = np.concatenate([npz_data["node_opcode"], np.array([MAX_OP_CODE - 1])], axis=0)
 
         # get the new features
         logger.info("Extracting new features from protobuf")
         input_features, new_features = get_additional_features(m, npz_data, padding=padding)
 
-        # log some of the features with large ranges
+        # log some of the features with large ranges (shift to make them positive)
         node_feat = npz_data["node_feat"]
         node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
-        input_features = np.log(input_features + 2)
         new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]] + 2)
+        input_features = np.log(input_features + 3)
 
         # create the dim features
         dim_features = np.concatenate(
@@ -95,12 +108,10 @@ def add_features(
         # get the pe
         logger.info("Computing positional encodings")
 
-        pe_asym = compute_pe(
+        pe_asym = compute_pe_tg(
             edge_index=npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_asym, device="cuda"
         )
-        pe_sym = compute_pe(
-            npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_sym, symmetric=True, device="cuda"
-        )
+        pe_sym = compute_pe_rwpe(npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_sym, device="cuda")
 
         # add the pe
         npz_data["pe_asym"] = pe_asym
