@@ -29,11 +29,11 @@ def setup(rank, world_size):
 
     # TODO: make this parameters
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    os.environ["MASTER_PORT"] = "12356"
 
     # initialize the process group
-    # dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
-    dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    dist.init_process_group("gloo", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
+    # dist.init_process_group("nccl", rank=rank, world_size=world_size, timeout=datetime.timedelta(seconds=36000))
 
 
 def cleanup():
@@ -133,7 +133,7 @@ def train_network(rank, kwargs):
     network = TPUGraphNetwork(
         embedding_out=512,
         message_network_dims=[256 + 128, 256, 256, 256],
-        n_normal_features=140 + 30 + 16,
+        n_normal_features=140 + 30 + 2 * 30 + 16,
         n_pe_features=128,
         n_configs=18,
         embedding_dim=128,

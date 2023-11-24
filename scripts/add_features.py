@@ -83,15 +83,15 @@ def add_features(
         )
         npz_data["node_opcode"] = np.concatenate([npz_data["node_opcode"], np.array([MAX_OP_CODE - 1])], axis=0)
 
+        # add the node to the number
+        n_nodes += 1
+
         # get the new features
         logger.info("Extracting new features from protobuf")
         input_features, new_features = get_additional_features(m, npz_data, padding=padding)
-
-        # log some of the features with large ranges (shift to make them positive)
+        
+        # get the node features
         node_feat = npz_data["node_feat"]
-        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
-        new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]] + 2)
-        input_features = np.log(input_features + 3)
 
         # create the dim features
         dim_features = np.concatenate(
@@ -101,6 +101,11 @@ def add_features(
             ],
             axis=1,
         )
+ 
+        # log some of the features with large ranges (shift to make them positive)
+        node_feat[:, LOG_FEATURES] = np.log(node_feat[:, LOG_FEATURES] + 1)
+        new_features[:, [4, 5, 6, 7]] = np.log(new_features[:, [4, 5, 6, 7]] + 2)
+        input_features = np.log(input_features + 3)
 
         # add the new features
         npz_data["node_feat"] = np.concatenate([node_feat, new_features, input_features, dim_features], axis=1)
@@ -109,7 +114,7 @@ def add_features(
         logger.info("Computing positional encodings")
 
         pe_asym = compute_pe_tg(
-            edge_index=npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_asym, device="cuda"
+            edge_index=npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_asym,
         )
         pe_sym = compute_pe_rwpe(npz_data["edge_index"], n_nodes=n_nodes, num_lpe_vecs=pe_dim_sym, device="cuda")
 

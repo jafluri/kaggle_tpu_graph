@@ -114,6 +114,9 @@ def compute_pe_rwpe(
     :return: The positional encoding
     """
 
+    # reference in case the first try fails
+    edge_index_orig = edge_index
+
     # create the data
     if symmetric:
         edge_index = np.concatenate([edge_index, np.flipud(edge_index)], axis=1)
@@ -145,7 +148,7 @@ def compute_pe_rwpe(
         # check if the device was a GPU
         if torch.device(device).type == "cuda":
             logger.warning("Could not compute PE on GPU, trying CPU")
-            return compute_pe_rwpe(edge_index, n_nodes, device="cpu", num_lpe_vecs=num_lpe_vecs, symmetric=symmetric)
+            return compute_pe_rwpe(edge_index_orig, n_nodes, device="cpu", num_lpe_vecs=num_lpe_vecs, symmetric=symmetric)
         else:
             raise e
 

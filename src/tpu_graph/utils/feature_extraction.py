@@ -46,7 +46,9 @@ def get_additional_features(proto_module: HloModuleProto, data_dict: dict[str, n
     features = data_dict["node_feat"]
     op_codes = data_dict["node_opcode"]
     n_nodes = len(op_codes)
-    assert n_nodes == n_i
+
+    # the number of nodes should match (add virtual output node)
+    assert n_nodes == n_i + 1
 
     # init the new features (add one for the imaginary node)
     new_features = np.full(n_nodes, padding, dtype=dt)
