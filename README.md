@@ -4,30 +4,7 @@
 
 ## Overview
 
-This repo contains some code for the kaggle project for TPU graph.
-
-### Installation
-
-In theory as easy as
-
-```bash
-pip install -e .
-```
-
-#### Dependencies
-
-TBD
-
-## Development
-
-### Hooks
-
-Pre-commit hooks come in any color you'd like
-
-```bash
-pre-commit install -c .hooks/.pre-commit-config.yaml
-```
-
-### TODO
-
-- Implement stuff
+This is the branch for the submission of the `tile` collection. 
+Please follow the instructions of the main barch to install the dependencies and then feel free to explore. 
+The repo here is a bit messy, but the tile collection does not require any special preparation. 
+Models can be trained using the `training.py` script in the `scripts` folder.
