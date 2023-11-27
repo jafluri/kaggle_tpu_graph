@@ -4,30 +4,6 @@
 
 ## Overview
 
-This repo contains some code for the kaggle project for TPU graph.
-
-### Installation
-
-In theory as easy as
-
-```bash
-pip install -e .
-```
-
-#### Dependencies
-
-TBD
-
-## Development
-
-### Hooks
-
-Pre-commit hooks come in any color you'd like
-
-```bash
-pre-commit install -c .hooks/.pre-commit-config.yaml
-```
-
-### TODO
-
-- Implement stuff
+This is the branch for the submission of the `layout:xla:default` collection. 
+Please follow the instructions of the main barch to install the dependencies and then feel free to explore. 
+Note that the repo here is in a messy state and there is no nice script like `add_features.py` to add the features to the dataset that makes it easy to train models.
